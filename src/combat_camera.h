@@ -1,30 +1,27 @@
 #pragma once
 #include "camera_comfort.h"
+#include "game_build.h"
 #include <cstdint>
 namespace fp {
 // ACU 1.5.0 Enter callbacks identified in the reference checkout's
 // ParkourDebugging/LoggingTheHumanStates.cpp; no game state is written.
-inline bool CombatEnter(std::uintptr_t rva) {
- switch(rva) {
- case 0x19BAA40: case 0x19AA430: case 0x19ABA10: case 0x19AB450:
- case 0x19AAD80: case 0x19AAA90: case 0x19A98D0: case 0x1999D30:
- case 0x19B39D0: case 0x19B3460: case 0x19AF160: case 0x19AEA00: return true;
- default:return false;
- }
+inline bool CombatEnter(std::uintptr_t rva,const GameBuild& build=Build150) {
+ for(const auto address:build.combat)if(rva==address)return true;
+ return false;
 }
 // Captured during the user's Leap of Faith: safe-airborne node's action
 // type getter is RVA 194D00 (mov eax,70h; ret). No game function is called.
 template<class Reader>
-bool LeapAction(Reader read,std::uintptr_t base,std::uintptr_t node) {
+bool LeapAction(Reader read,std::uintptr_t base,std::uintptr_t node,const GameBuild& build=Build150) {
  std::uintptr_t parents=0,parent=0,action=0,table=0,getter=0;
  std::uint16_t count=0;
  return read(node+0x28,parents)&&parents&&read(node+0x32,count)&&count>0&&count<=64&&
   read(parents,parent)&&parent&&read(parent+0x1F0,action)&&action&&
-  read(action+8,table)&&table&&read(table+0x8B0,getter)&&getter==base+0x194D00;
+  read(action+8,table)&&table&&read(table+0x8B0,getter)&&getter==base+build.leapGetter;
 }
 enum class CombatState { Unknown, Clear, Active };
 template<class Reader>
-CombatState ReadCombat(Reader read,std::uintptr_t base,std::uintptr_t entity,bool* groundRoll=nullptr,bool* leap=nullptr) {
+CombatState ReadCombat(Reader read,std::uintptr_t base,std::uintptr_t entity,bool* groundRoll=nullptr,bool* leap=nullptr,const GameBuild& build=Build150) {
  if(groundRoll)*groundRoll=false;
  if(leap)*leap=false;
  std::uintptr_t components=0,anim=0,owner=0,human=0,holder=0,receivers=0;
@@ -40,9 +37,9 @@ CombatState ReadCombat(Reader read,std::uintptr_t base,std::uintptr_t entity,boo
  for(std::uint16_t i=0;i<receiverCount;++i) {
   std::uintptr_t node=0,enter=0;
   if(!read(receivers+16*i+8,node)||!node||!read(node+0xE0,enter))return CombatState::Unknown;
-  if(enter>=base&&CombatEnter(enter-base))foundCombat=true;
-  if(enter==base+0x1A69680)foundRoll=true;
-  if(enter==base+0x1ADD2D0&&LeapAction(read,base,node))foundLeap=true;
+  if(enter>=base&&CombatEnter(enter-base,build))foundCombat=true;
+  if(enter==base+build.roll)foundRoll=true;
+  if(enter==base+build.leap&&LeapAction(read,base,node,build))foundLeap=true;
  }
  // Reject a replaced list instead of using a partial transition snapshot.
  std::uintptr_t current=0;std::uint16_t currentCount=0;

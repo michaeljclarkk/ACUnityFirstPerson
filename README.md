@@ -7,8 +7,8 @@ Press **.** to toggle first person. The camera follows Arno's animated head, hid
 and hood from the main view while keeping his cast shadow, and pulls back automatically when
 you run into geometry.
 
-> **Status: 0.8.4 — playable, actively developed.** Ordinary walking and parkour are the
-> best-tested paths.
+> **Status: 0.8.5 — 1.5.1 compatibility testing.** Separate executable profiles preserve
+> 1.5.0 support. The 1.5.1 gameplay port needs walking, combat, parkour and dive validation.
 
 ![First-person rooftop view in Assassin's Creed Unity](acu-repo-hero.png)
 
@@ -29,10 +29,13 @@ the ACUFixes Plugin Loader.
 
 ## Requirements
 
-- Assassin's Creed Unity, PC, 64-bit. Built and tested against the current Steam/Uplay
-  `ACU.exe` (SHA-256 `748ABDC6456397FE7D8080F975F2A5ED3123BCE548E7BF1C68B23F47E8B27E40`).
+- Assassin's Creed Unity, PC, 64-bit. Recognized executables:
+  - 1.5.0: SHA-256 `748ABDC6456397FE7D8080F975F2A5ED3123BCE548E7BF1C68B23F47E8B27E40`.
+  - 1.5.1: SHA-256 `9725F1FB9E82521506007EE50763612D319A02EEFC48E09D8EB845DFF4BBCD87`.
+  Unknown fingerprints remain rejected before camera writes.
 - [ACUFixes Plugin Loader](https://github.com/NameTaken3125/ACUFixes) installed and working
-  (developed against loader 0.9.2). This plugin does nothing on its own.
+  (0.9.2 for 1.5.0; use the [1.5.1 loader port](https://github.com/antr1x/ACUFixes/releases/tag/v0.9.4.0-hf3)
+  for 1.5.1). This plugin does nothing on its own.
 - DirectX / ReShade and other plugin-loader mods are fine; the mod makes no global game hooks.
 
 ## Installation

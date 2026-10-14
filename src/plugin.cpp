@@ -15,7 +15,7 @@
 #include <cstdlib>
 
 namespace {
-constexpr std::uintptr_t kCameraManagerRva=0x521AAD0, kMenuManagerRva=0x51EACE8;
+const fp::GameBuild* gameBuild=nullptr;
 constexpr size_t kFxSlot=0x288/sizeof(void*), kTableSlots=256;
 using ApplyFx=void(__fastcall*)(void*, float*, float*, float*);
 std::uintptr_t base=0;
@@ -75,7 +75,7 @@ bool SwapTable(void* camera,void** expected,void** replacement) {
 void* LocalCamera() {
     std::uintptr_t manager=0,entries=0,cam=0;
     std::uint16_t count=0;
-    if (!Read(base+kCameraManagerRva,manager) || !manager ||
+    if (!gameBuild || !Read(base+gameBuild->camera,manager) || !manager ||
         !Read(manager+0x40,entries) || !entries ||
         !Read(manager+0x4A,count) || count==0 || count>16 ||
         !Read(entries,cam)) return nullptr;
@@ -84,7 +84,7 @@ void* LocalCamera() {
 bool MenuOpen() {
     std::uintptr_t manager=0,stack=0;
     std::uint16_t count=0;
-    if (!Read(base+kMenuManagerRva,manager) || !manager ||
+    if (!gameBuild || !Read(base+gameBuild->menu,manager) || !manager ||
         !Read(manager+0x30,stack)) return true;
     if (!stack) return false;
     return !Read(stack+0x1A,count) || count!=0;
@@ -103,16 +103,16 @@ bool SupportedBuild() {
     if (!Read(base,dos) || dos.e_magic!=IMAGE_DOS_SIGNATURE ||
         dos.e_lfanew<=0 || dos.e_lfanew>0x100000 ||
         !Read(base+static_cast<unsigned>(dos.e_lfanew),nt)) return false;
-    return nt.Signature==IMAGE_NT_SIGNATURE &&
+    if (!(nt.Signature==IMAGE_NT_SIGNATURE &&
         nt.FileHeader.Machine==IMAGE_FILE_MACHINE_AMD64 &&
-        nt.OptionalHeader.Magic==IMAGE_NT_OPTIONAL_HDR64_MAGIC &&
-        nt.FileHeader.TimeDateStamp==0x54DB5826 &&
-        nt.OptionalHeader.SizeOfImage==0x07825000 &&
-        nt.OptionalHeader.CheckSum==0x01D87E65;
+        nt.OptionalHeader.Magic==IMAGE_NT_OPTIONAL_HDR64_MAGIC)) return false;
+    gameBuild=fp::SelectBuild(nt.FileHeader.TimeDateStamp,nt.OptionalHeader.SizeOfImage,nt.OptionalHeader.CheckSum);
+    if(gameBuild) { Log("Selected executable profile:"); Log(gameBuild->name); }
+    return gameBuild!=nullptr;
 }
 bool InGameImage(void* p) {
     const auto a=reinterpret_cast<std::uintptr_t>(p);
-    return a>=base && a<base+0x07825000;
+    return gameBuild && a>=base && a<base+gameBuild->imageSize;
 }
 float Setting(const wchar_t* key,float fallback,float low,float high) {
     wchar_t text[64]{};
@@ -151,7 +151,7 @@ bool SetViewFlags(std::uintptr_t visual,std::uint16_t viewFlags) {
     std::uint16_t flags=0;
     if(!Read(visual+0x54,flags)||!Read(visual+0x40,lod)||!lod||
        !Read(lod,table)||!table||!Read(table+0x118,method)||
-       (method!=base+0x21E9550&&method!=base+0x21E9480))return false;
+       (method!=base+gameBuild->refreshChildren&&method!=base+gameBuild->refresh))return false;
     const auto next=fp::RestoreMainView(flags,viewFlags);
     if(next==flags)return true;
     __try {
@@ -180,7 +180,7 @@ void UpdateHeadVisibility() {
         std::uint64_t asset=0;
         std::uint16_t flags=0;
         if(!Read(components+8*i,visual) || !visual || !Read(visual,vt) ||
-           vt!=base+0x309C7A0 || !Read(visual+0x10,owner) || owner!=entity ||
+           vt!=base+gameBuild->visual || !Read(visual+0x10,owner) || owner!=entity ||
            !Read(visual+0x38,shared) || !shared || !Read(shared+0x10,asset) ||
            !KnownHeadAsset(asset) || !Read(visual+0x54,flags)) continue;
         int record=-1;
@@ -226,12 +226,12 @@ bool CastClearance(std::uintptr_t world,std::uintptr_t player,
     alignas(16) float ray[4]={direction.x,direction.y,direction.z,0};
     bool constructed=false,ok=false;
     __try {
-        reinterpret_cast<Construct>(base+0x25EC5A0)(&query);
+        reinterpret_cast<Construct>(base+gameBuild->rayCtor)(&query);
         constructed=true;
         // The documented gunshot solid-geometry filter avoids querying all trigger types.
         const std::uint64_t flags=0x1A00805247ULL;
         memcpy(query.bytes+0x650,&flags,sizeof(flags));
-        reinterpret_cast<Cast>(base+0x25FD7D0)(&query,reinterpret_cast<void*>(world),start,ray,length,1,0);
+        reinterpret_cast<Cast>(base+gameBuild->rayCast)(&query,reinterpret_cast<void*>(world),start,ray,length,1,0);
         std::uintptr_t hits=0;
         std::uint16_t count=0;
         memcpy(&hits,query.bytes+8,8);
@@ -249,7 +249,7 @@ bool CastClearance(std::uintptr_t world,std::uintptr_t player,
         }
     } __except(EXCEPTION_EXECUTE_HANDLER) {ok=false;}
     if(constructed) {
-        __try {reinterpret_cast<Destroy>(base+0x10340)(query.bytes+8);}
+        __try {reinterpret_cast<Destroy>(base+gameBuild->rayDestroy)(query.bytes+8);}
         __except(EXCEPTION_EXECUTE_HANDLER) {ok=false;}
     }
     return ok;
@@ -298,7 +298,7 @@ std::uintptr_t NavigationState(std::uintptr_t entity) {
        !Read(holder+0x3C4,bags)||!bags||!Read(holder+0x3CE,bagCount)||bagCount<=366||bagCount>2048||
        !Read(bags+366*8,bag)||!bag||!Read(bag+8,receivers)||!receivers||
        !Read(bag+0x12,receiverCount)||!receiverCount||receiverCount>128||
-       !Read(receivers+8,node)||!node||!Read(node,vt)||vt<base||vt>=base+0x07825000)return 0;
+       !Read(receivers+8,node)||!node||!Read(node,vt)||!InGameImage(reinterpret_cast<void*>(vt)))return 0;
     return vt-base;
 }
 
@@ -314,7 +314,7 @@ bool ApplyEye(void* self,float* position,float* rotation,float* fov,const fp::Qu
     if(!fp::Finite(old)||!fp::Finite(root))return false;
     const auto read=[](std::uintptr_t addr,auto& value){return Read(addr,value);};
     bool groundRoll=false,leap=false;
-    const auto combatState=fp::ReadCombat(read,base,entity,&groundRoll,&leap);
+    const auto combatState=fp::ReadCombat(read,base,entity,&groundRoll,&leap,*gameBuild);
     const bool followLeap=followLeapOfFaith&&leap;
     // Native cinematic pullback is expected during a verified leap.
     if(fp::DistanceSquared(old,root)>144.0f&&!followLeap)return false;
@@ -346,7 +346,7 @@ bool ApplyEye(void* self,float* position,float* rotation,float* fov,const fp::Qu
     state.tick=tick.QuadPart;
     if(!state.look.Step(q,bodyForward,maxLookYaw,maxLookDown,maxLookUp,q))return false;
     fp::Vec3 head{};
-    const bool hasHead=trackHead&&fp::ReadHead(read,base,entity,head);
+    const bool hasHead=trackHead&&fp::ReadHead(read,base,entity,head,*gameBuild);
     const fp::Vec3 anchor=state.filter.Step(root,head,hasHead,dt,headHalfLife,eyeHeight-headEyeHeight,
         fp::FollowRoll(followCombatMotion,groundRoll,hasHead)||(followLeap&&hasHead));
     const bool headAvailable=trackHead&&state.filter.Available();
@@ -360,7 +360,7 @@ bool ApplyEye(void* self,float* position,float* rotation,float* fov,const fp::Qu
     // bends or reuse combat's 0.45-second hold for orientation.
     const float motionAmount=(fp::FollowRoll(followCombatMotion,groundRoll,hasHead)||(followLeap&&hasHead))?1.0f:0.0f;
     fp::Quat torso{};
-    const bool hasTorso=hasHead&&motionAmount>0.001f&&fp::ReadTorso(read,base,entity,torso);
+    const bool hasTorso=hasHead&&motionAmount>0.001f&&fp::ReadTorso(read,base,entity,torso,*gameBuild);
     const auto bodyRotation=state.motion.Step(torso,hasTorso,state.look.previousBody,motionAmount,dt,followLeap?&q:nullptr);
     // Keep the filtered anchor, including during roll recovery. Raw torso/head
     // displacement must not drag the camera through an attack animation.
@@ -497,7 +497,7 @@ void Menu(loader::Gui& gui) {
         draft.combatForward=combatForward;draft.combatFov=combatFov;initialized=true;
     }
     ImGui::PushID("ACUnityFirstPerson");
-    ImGui::TextUnformatted("First Person 0.8.4");
+    ImGui::TextUnformatted("First Person 0.8.5");
     bool on=enabled.load();
     ImGui::BeginDisabled(faulted.load());
     if(ImGui::Checkbox("First person enabled",&on)) {
@@ -627,7 +627,7 @@ bool Ready(loader::Interface&) {
     collisionEnabled=GetPrivateProfileIntW(L"Camera",L"CollisionGuard",1,iniPath)!=0;
     collisionPadding=Setting(L"CollisionPadding",0.12f,0.05f,0.3f);
     collisionRadius=Setting(L"CollisionRadius",0.16f,0.03f,0.25f);
-    Log("Prototype 0.8.4 ready: configurable key and camera settings in plugin menu. Starts OFF.");
+    Log("Prototype 0.8.5 ready: configurable key and camera settings in plugin menu. Starts OFF.");
     return true;
 }
 }
@@ -646,6 +646,6 @@ extern "C" __declspec(dllexport) bool ACUPluginStart(loader::Interface& api,load
         swprintf_s(logPath,L"%sACUnityFirstPerson.log",path)<0) return false;
     std::uint64_t version=0;
     if (!Read(reinterpret_cast<std::uintptr_t>(&api),version) || version<loader::kApi) return false;
-    info={loader::kApi,0x00000804,&Ready,&Menu,&Frame,nullptr,nullptr};
+    info={loader::kApi,0x00000805,&Ready,&Menu,&Frame,nullptr,nullptr};
     return true;
 }

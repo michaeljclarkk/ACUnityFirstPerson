@@ -24,6 +24,11 @@ int main() {
  m.put(holder+0x1B0,receivers);m.put(holder+0x1BA,std::uint16_t(1));m.put(receivers+8,node);
  m.put(node+0xE0,base+0x19BAA40);
  Check(fp::ReadCombat(m,base,entity)==fp::CombatState::Active,"combat parent detected");
+ for(const auto address:fp::Build151.combat) {
+  m.put(node+0xE0,base+address);
+  Check(fp::ReadCombat(m,base,entity,nullptr,nullptr,fp::Build151)==fp::CombatState::Active,"1.5.1 combat callback recognized");
+  Check(fp::ReadCombat(m,base,entity)==fp::CombatState::Clear,"1.5.1 callback rejected by old profile");
+ }
  m.put(node+0xE0,base+0x19AAD80);
  Check(fp::ReadCombat(m,base,entity)==fp::CombatState::Active,"parry detected");
  bool leap=false;
@@ -32,6 +37,13 @@ int main() {
  m.put(parent+0x1F0,action);m.put(action+8,table);m.put(table+0x8B0,base+0x194D00);
  m.put(node+0xE0,base+0x1ADD2D0);
  Check(fp::ReadCombat(m,base,entity,nullptr,&leap)==fp::CombatState::Clear&&leap,"specific Leap of Faith action detected");
+ m.put(node+0xE0,base+fp::Build151.leap);
+ m.put(table+0x8B0,base+fp::Build151.leapGetter);
+ Check(fp::ReadCombat(m,base,entity,nullptr,&leap,fp::Build151)==fp::CombatState::Clear&&leap,"1.5.1 leap state and action detected");
+ m.put(table+0x8B0,base+fp::Build150.leapGetter);
+ fp::ReadCombat(m,base,entity,nullptr,&leap,fp::Build151);
+ Check(!leap,"mixed-version leap getter rejected");
+ m.put(node+0xE0,base+fp::Build150.leap);
  m.put(table+0x8B0,base+0x123456);
  fp::ReadCombat(m,base,entity,nullptr,&leap);
  Check(!leap,"ordinary safe jumps excluded");

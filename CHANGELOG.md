@@ -2,6 +2,19 @@
 
 Reverse-chronological development notes. Newest first.
 
+## 0.8.5 — AC Unity 1.5.1 compatibility candidate
+
+Separate fingerprint-selected 1.5.0 and 1.5.1 address profiles cover camera/menu
+singletons, skeleton and visual identities, renderer refresh, ray queries, combat,
+ground rolls and Leap of Faith. Unknown executables remain rejected. Renderer
+refresh and leap-getter mappings were checked against loaded code from both games;
+the remaining mappings follow the antr1x ACUFixes 1.5.1 port. Existing configuration
+is preserved on install, with a backup of the previous DLL. Regression tests cover
+profile isolation, fingerprint rejection, head tracking and the 0.9.4 loader ABI.
+Live 1.5.1 startup confirmed profile selection, successful initialization and local
+player camera attachment. Full gameplay validation remains pending; this is not
+a published release.
+
 ## 0.8.4 RESTORE PRE-REGRESSION DIVE / DIAGNOSTICS
 Default toggle key is now period (.) instead of V, which collided with Eagle Vision.
 Period is added to the bindable-key allowlist; existing INIs keep their saved key.

@@ -18,6 +18,8 @@ int wmain(int argc,wchar_t** argv) {
     Check(!start(*reinterpret_cast<loader::Interface*>(api),output.info),"older loader rejected");
     api[0]=loader::kApi;
     Check(start(*reinterpret_cast<loader::Interface*>(api),output.info),"0.9.2 loader accepted");
+    api[0]=0x00090400;
+    Check(start(*reinterpret_cast<loader::Interface*>(api),output.info),"0.9.4 loader accepted");
     Check(output.sentinel==0xABCDEFull,"ABI output stays within caller allocation");
     Check(output.info.apiVersion==loader::kApi && output.info.onReady && output.info.onFrame,"required callbacks supplied");
         Check(output.info.onMenu!=nullptr && output.info.onUnpacked==nullptr,"menu callback supplied");

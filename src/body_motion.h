@@ -35,13 +35,13 @@ inline bool TorsoRotation(Vec3 hips,Vec3 left,Vec3 right,Quat& q){
  return true;
 }
 template<class Reader>
-bool ReadTorso(Reader read,std::uintptr_t base,std::uintptr_t entity,Quat& rotation){
+bool ReadTorso(Reader read,std::uintptr_t base,std::uintptr_t entity,Quat& rotation,const GameBuild& build=Build150){
  Transform transform{};std::uintptr_t components=0;std::uint16_t count=0;
  if(!read(entity+0x20,transform)||!read(entity+0x78,components)||!components||
     !read(entity+0x82,count)||count>128)return false;
  for(std::uint16_t i=0;i<count;++i){
   std::uintptr_t cp=0,vt=0,owner=0,info=0,map=0,buffer=0,poses=0;std::uint16_t bones=0;
-  if(!read(components+8*i,cp)||!cp||!read(cp,vt)||vt!=base+0x2E76630||
+  if(!read(components+8*i,cp)||!cp||!read(cp,vt)||vt!=base+build.skeleton||
      !read(cp+0x10,owner)||owner!=entity)continue;
   if(!read(cp+0x270,info)||!info||!read(info+0x38,map)||!map||!read(info+0x42,bones)||bones>1024||
      !read(cp+0x288,buffer)||!buffer||!read(buffer+0x178,poses)||!poses)return false;

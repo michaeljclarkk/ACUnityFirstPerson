@@ -25,6 +25,14 @@ int main(){
  m.put(poses+0x20*156,fp::Vec3{0,0.5f,1.4f});
  fp::Vec3 head{};
  Check(fp::ReadHead(m,base,entity,head),"head found in a 451-entry mapping");
+ m.put(skeleton,base+fp::Build151.skeleton);
+ Check(!fp::ReadHead(m,base,entity,head),"1.5.0 profile rejects 1.5.1 skeleton");
+ Check(fp::ReadHead(m,base,entity,head,fp::Build151),"1.5.1 skeleton uses its own profile");
+ m.put(skeleton,base+fp::Build150.skeleton);
+ Check(!fp::ReadHead(m,base,entity,head,fp::Build151),"1.5.1 profile rejects old skeleton");
+ Check(fp::SelectBuild(0x69945EEF,0x082A9000,0x023BF3F2)==&fp::Build151,"exact 1.5.1 fingerprint accepted");
+ Check(!fp::SelectBuild(0x69945EEF,0x07825000,0x023BF3F2),"mixed executable fingerprint rejected");
+ Check(!fp::SelectBuild(0x69945EEF,0x082A9000,0),"modified checksum rejected");
  Check(std::abs(head.y-20.5f)<0.001f && std::abs(head.z-31.4f)<0.001f,"animation translation follows body");
  m.put(poses+0x20*156,fp::Vec3{0,0.9f,1.1f});
  Check(fp::ReadHead(m,base,entity,head)&&std::abs(head.y-20.9f)<0.001f&&std::abs(head.z-31.1f)<0.001f,"sprint lean and crouch height followed");

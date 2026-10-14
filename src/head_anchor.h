@@ -1,5 +1,6 @@
 #pragma once
 #include "camera_math.h"
+#include "game_build.h"
 #include <cstdint>
 namespace fp {
 struct Transform { float m[16]; };
@@ -13,7 +14,7 @@ inline bool TransformPoint(const Transform& t,Vec3 p,Vec3& out) {
 }
 // Read only the published ACU 1.5.0 skeleton layout. No game function calls.
 template<class Reader>
-bool ReadHead(Reader read,std::uintptr_t base,std::uintptr_t entity,Vec3& world) {
+bool ReadHead(Reader read,std::uintptr_t base,std::uintptr_t entity,Vec3& world,const GameBuild& build=Build150) {
     std::uintptr_t components=0;
     std::uint16_t componentCount=0;
     Transform transform{};
@@ -22,7 +23,7 @@ bool ReadHead(Reader read,std::uintptr_t base,std::uintptr_t entity,Vec3& world)
     for(std::uint16_t i=0;i<componentCount;++i) {
         std::uintptr_t component=0,vt=0,owner=0;
         if(!read(components+8*i,component) || !component ||
-           !read(component,vt) || vt!=base+0x2E76630 ||
+           !read(component,vt) || vt!=base+build.skeleton ||
            !read(component+0x10,owner) || owner!=entity) continue;
         std::uintptr_t info=0,mapping=0,buffer=0,poses=0;
         std::uint16_t count=0;
