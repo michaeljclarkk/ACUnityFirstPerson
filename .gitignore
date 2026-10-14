@@ -1,0 +1,13 @@
+/build/
+/external/
+/dist/
+*.log
+*.user
+.vs/
+/backups/
+
+/RESEARCH.txt
+/scripts/capture-leap-state.ps1
+/scripts/capture-render-code.ps1
+/scripts/inspect-player.ps1
+/scripts/inspect-render-visibility.ps1

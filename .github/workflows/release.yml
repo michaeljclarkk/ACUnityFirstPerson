@@ -1,0 +1,93 @@
+name: Release
+
+# Tag-driven. Push a v<version> tag and this builds, tests, packages and publishes.
+# Also runnable from the Actions tab against a tag that already exists.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to release, for example v0.8.4'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # Windows Server 2025 ships Visual Studio 2026, matching the local toolchain.
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@v7
+
+      - name: Resolve and validate the tag
+        id: release
+        shell: pwsh
+        env:
+          # Passed through the environment so the value is never interpolated into the script.
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: |
+          $tag = $env:RELEASE_TAG
+          if ($tag -notmatch '^v(\d+\.\d+\.\d+)$') { throw "Release tags must look like v1.2.3, got '$tag'." }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "version=$($Matches[1])" >> $env:GITHUB_OUTPUT
+
+      - name: Fail if the tag and the source version disagree
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          $match = [regex]::Match((Get-Content CMakeLists.txt -Raw), 'project\(ACUnityFirstPerson VERSION (\d+\.\d+\.\d+)')
+          if (!$match.Success) { throw 'Cannot read the project version from CMakeLists.txt.' }
+          if ($match.Groups[1].Value -ne $env:VERSION) {
+            throw "Tag says $env:VERSION but CMakeLists.txt says $($match.Groups[1].Value). Bump the version in CMakeLists.txt, src/plugin.cpp and ACUnityFirstPerson.ini first."
+          }
+          Write-Host "Building version $env:VERSION."
+
+      - name: Configure
+        run: cmake -S . -B build -A x64
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Package
+        shell: pwsh
+        run: .\scripts\package.ps1 -SkipBuild
+
+      - name: Publish the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          $zip = "dist\ACUnityFirstPerson-$env:VERSION.zip"
+          if (!(Test-Path -LiteralPath $zip)) { throw "Expected $zip to exist." }
+          $notes = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+          @(
+            'First-person camera for **Assassin''s Creed Unity**.'
+            ''
+            '**Requires the [ACUFixes Plugin Loader](https://github.com/NameTaken3125/ACUFixes).** This plugin does nothing on its own.'
+            ''
+            '## Install'
+            ''
+            '1. Install the ACUFixes Plugin Loader and confirm it loads.'
+            '2. Extract this archive into your game folder, keeping the `ACUFixes` folder layout.'
+            '3. Restart the game after installing or updating.'
+            ''
+            '## Use'
+            ''
+            '- Press `.` to toggle first person.'
+            '- Press `Insert` for the loader menu, then select `ACUnityFirstPerson` to change the camera or rebind the toggle.'
+            ''
+            'See the bundled `README.md` for every setting and `CHANGELOG.md` for what changed.'
+          ) | Set-Content -LiteralPath $notes -Encoding utf8
+          gh release create $env:RELEASE_TAG $zip --title "ACUnityFirstPerson $env:VERSION" --notes-file $notes --verify-tag
