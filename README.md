@@ -10,6 +10,23 @@ you run into geometry.
 > **Status: 0.8.4 — playable, actively developed.** Ordinary walking and parkour are the
 > best-tested paths.
 
+![First-person rooftop view in Assassin's Creed Unity](acu-repo-hero.png)
+
+## Current local mod and visual setup
+
+The screenshot above was captured from a local ACU install using:
+
+- **ACUFixes Plugin Loader** 0.9.2, with the **ACUFixes** base fixes enabled.
+- **ACUnityFirstPerson** — first-person camera plugin.
+- **CamnKaboom** — installed ACUFixes plugin.
+- **Combat Features** — installed ACUFixes plugin.
+- **VisualCustomization** — enabled with outfit, cloth, rendering, LOD and effect-removal settings.
+- **NewAnimations** — ACVI upper-body hood/hat animation replacements.
+- **ReShade 6.8.0.2158** via `dxgi.dll`, loading the `HD_Realism.ini` preset. Its recorded effect stack includes SMAA, Deband, ColorMatrix, Tonemap, Curves, AmbientLight, Technicolor2 and LumaSharpen.
+
+This describes the current local capture environment; the first-person plugin itself only requires
+the ACUFixes Plugin Loader.
+
 ## Requirements
 
 - Assassin's Creed Unity, PC, 64-bit. Built and tested against the current Steam/Uplay
