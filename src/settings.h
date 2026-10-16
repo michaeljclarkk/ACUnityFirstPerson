@@ -6,6 +6,7 @@
 namespace fp {
 struct Settings {
  int key=VK_OEM_PERIOD;
+ float headTurnLimit=180; // Degrees to either side; 180 preserves native turning.
  float fov=70,eyeHeight=0.12f,forward=0.16f,smoothing=0.07f,padding=0.12f,radius=0.16f;
  bool hideHead=true,collision=true,automatic=false;
  bool combat=true,followMotion=true,followLeap=true;
@@ -19,7 +20,7 @@ inline bool BindableKey(int k) {
 }
 inline bool Range(float v,float low,float high){return std::isfinite(v)&&v>=low&&v<=high;}
 inline bool ValidSettings(const Settings& s) {
- return BindableKey(s.key)&&(s.fov==0||Range(s.fov,40,100))&&
+ return Range(s.headTurnLimit,0,180)&&BindableKey(s.key)&&(s.fov==0||Range(s.fov,40,100))&&
  Range(s.eyeHeight,-0.2f,0.4f)&&Range(s.forward,-0.1f,0.3f)&&
  Range(s.smoothing,0.01f,0.3f)&&Range(s.padding,0.05f,0.3f)&&Range(s.radius,0.03f,0.25f)&&Range(s.combatHeight,-0.2f,0.2f)&&
  Range(s.combatForward,-0.1f,0.3f)&&Range(s.combatFov,40,100);
@@ -46,6 +47,7 @@ inline bool SaveSettings(const wchar_t* path,const Settings& s) {
 
  wchar_t key[16]{};swprintf_s(key,L"%d",s.key);
  if(!WritePrivateProfileStringW(L"Camera",L"ToggleKey",key,temporary.c_str()))ok=false;
+ write(L"HeadTurnLimit",s.headTurnLimit);
  write(L"VerticalFOV",s.fov);write(L"HeadEyeHeight",s.eyeHeight);write(L"HeadForward",s.forward);
  write(L"HeadSmoothingHalfLife",s.smoothing);write(L"CollisionPadding",s.padding);write(L"CollisionRadius",s.radius);
  const auto flag=[&](const wchar_t* name,bool value){if(!WritePrivateProfileStringW(L"Camera",name,value?L"1":L"0",temporary.c_str()))ok=false;};

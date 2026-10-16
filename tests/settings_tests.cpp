@@ -11,9 +11,11 @@ int main(){
  Check(GetTempPathW(MAX_PATH,directory)!=0,"temporary directory");
  Check(GetTempFileNameW(directory,L"acu",0,path)!=0,"isolated test file");
  Check(WritePrivateProfileStringW(L"Camera",L"OtherModSetting",L"preserve",path)!=FALSE,"seed unrelated setting");
+ s.headTurnLimit=90;
  s.key=VK_F8;s.fov=82;s.hideHead=false;s.automatic=true;
  s.followLeap=false;s.followMotion=false;s.combat=false;s.combatHeight=-0.12f;s.combatForward=-0.04f;s.combatFov=85;
  Check(fp::SaveSettings(path,s),"save succeeds");
+ Check(GetPrivateProfileIntW(L"Camera",L"HeadTurnLimit",0,path)==90,"head turn limit persists");
  Check(GetPrivateProfileIntW(L"Camera",L"ToggleKey",0,path)==VK_F8,"key persisted as integer");
  Check(GetPrivateProfileIntW(L"Camera",L"HideHead",1,path)==0,"boolean persisted");
  Check(GetPrivateProfileIntW(L"Camera",L"AutoThirdPerson",0,path)==1,"fallback persisted");
@@ -30,11 +32,17 @@ int main(){
  Check(std::abs(wcstof(value,nullptr)-82)<0.001f,"float round trip");
  GetPrivateProfileStringW(L"Camera",L"OtherModSetting",L"",value,64,path);
  Check(wcscmp(value,L"preserve")==0,"unrelated setting preserved");
+ for(float value:{-1.0f,181.0f,NAN}) {
+  s.headTurnLimit=value;Check(!fp::SaveSettings(path,s),"invalid head turn limit rejected");
+ }
+ s.headTurnLimit=0;Check(fp::ValidSettings(s),"zero head turn valid");
+ s.headTurnLimit=180;Check(fp::ValidSettings(s),"native head turn valid");
  s.combatHeight=-0.3f;
  Check(!fp::SaveSettings(path,s),"unsafe combat offset rejected");
  s.combatHeight=-0.12f;
  s.key=VK_INSERT;
  Check(!fp::SaveSettings(path,s),"invalid settings rejected");
+ Check(GetPrivateProfileIntW(L"Camera",L"HeadTurnLimit",0,path)==90,"head turn limit persists");
  Check(GetPrivateProfileIntW(L"Camera",L"ToggleKey",0,path)==VK_F8,"failed save preserves original");
  s.key='V';s.fov=0;
  Check(fp::SaveSettings(path,s),"native FOV permitted");

@@ -2,6 +2,25 @@
 
 Reverse-chronological development notes. Newest first.
 
+## Unreleased — native camera yaw limits
+
+Adds the Head turn limit (left / right) slider and persistent HeadTurnLimit key.
+Range is 0-180 degrees per side: 90 means directly left/right, 180 straight behind
+and unrestricted. Native current and target orbit are constrained before Unity
+constructs its view and movement quaternions. A local camera behavior-table clone
+intercepts only the verified finalization call; no executable instructions change.
+Each executable profile has separately verified call-site/helper addresses.
+Unknown code or a foreign behavior callback leaves the game camera unchanged.
+Ground rolls and Leap of Faith bypass the restriction. Settings apply on save.
+
+Replaces both failed output-only approaches. They allowed the underlying camera
+to continue rotating, causing retained movement offsets or 170-176 degree snaps.
+The render controller once again always preserves native yaw. Native orbit angle
+runs opposite to view yaw (view yaw = pi - orbit); confirmed by live read-only
+sampling. Regression tests simulate feedback through repeated stop pressure,
+reversal, rear-seam overshoot, body catch-up and world/body angle wrapping.
+Gameplay validation of the new native callback remains pending.
+
 ## 0.8.5 â€” AC Unity 1.5.1 compatibility candidate
 
 Separate fingerprint-selected 1.5.0 and 1.5.1 address profiles cover camera/menu

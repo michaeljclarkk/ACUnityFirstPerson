@@ -2,6 +2,7 @@
 #include "camera_math.h"
 #include "head_anchor.h"
 #include "camera_comfort.h"
+#include "native_yaw.h"
 #include "settings.h"
 #include "combat_camera.h"
 #include "body_motion.h"
@@ -13,6 +14,7 @@
 #include <cstring>
 #include <cwchar>
 #include <cstdlib>
+#include <intrin.h>
 
 namespace {
 const fp::GameBuild* gameBuild=nullptr;
@@ -41,7 +43,8 @@ std::atomic<unsigned> cameraEpoch{0};
 std::atomic<bool> collisionFault{false},collisionRetracting{false},collisionReady{false};
 bool collisionEnabled=true,autoThirdPerson=false;
 float collisionPadding=0.12f,collisionRadius=0.16f,headHalfLife=0.07f;
-float maxLookYaw=80*fp::Pi/180,maxLookDown=60*fp::Pi/180,maxLookUp=70*fp::Pi/180;
+float headTurnLimit=180;
+bool nativeYawSupported=false;
 SRWLOCK logLock=SRWLOCK_INIT;
 
 void Log(const char* message) {
@@ -344,7 +347,7 @@ bool ApplyEye(void* self,float* position,float* rotation,float* fov,const fp::Qu
     }
     const float dt=state.tick?static_cast<float>(std::clamp(elapsed,0.0,0.1)):0;
     state.tick=tick.QuadPart;
-    if(!state.look.Step(q,bodyForward,maxLookYaw,maxLookDown,maxLookUp,q))return false;
+    if(!state.look.Step(q,bodyForward,q))return false;
     fp::Vec3 head{};
     const bool hasHead=trackHead&&fp::ReadHead(read,base,entity,head,*gameBuild);
     const fp::Vec3 anchor=state.filter.Step(root,head,hasHead,dt,headHalfLife,eyeHeight-headEyeHeight,
@@ -492,7 +495,7 @@ void Menu(loader::Gui& gui) {
         draft.key=toggleKey;draft.fov=fovDegrees;draft.eyeHeight=headEyeHeight;
         draft.forward=headForward;draft.smoothing=headHalfLife;draft.padding=collisionPadding;
         draft.radius=collisionRadius;draft.hideHead=hideHead;draft.collision=collisionEnabled;
-        draft.automatic=autoThirdPerson;
+        draft.automatic=autoThirdPerson;draft.headTurnLimit=headTurnLimit;
         draft.followLeap=followLeapOfFaith;draft.followMotion=followCombatMotion;draft.combat=combatFraming;draft.combatHeight=combatEyeHeight;
         draft.combatForward=combatForward;draft.combatFov=combatFov;initialized=true;
     }
@@ -532,6 +535,11 @@ void Menu(loader::Gui& gui) {
     ImGui::EndDisabled();
     ImGui::SliderFloat("Eye height adjustment",&draft.eyeHeight,-0.2f,0.4f,"%.2f m",ImGuiSliderFlags_AlwaysClamp);
     ImGui::SliderFloat("Eye forward adjustment",&draft.forward,-0.1f,0.3f,"%.2f m",ImGuiSliderFlags_AlwaysClamp);
+    ImGui::BeginDisabled(!nativeYawSupported);
+    ImGui::SliderFloat("Head turn limit (left / right)",&draft.headTurnLimit,0,180,"%.0f degrees per side",ImGuiSliderFlags_AlwaysClamp);
+    ImGui::EndDisabled();
+    ImGui::TextWrapped("Maximum turn from body forward in either direction: 90 = left/right; 180 = straight behind, unrestricted. Save & apply updates the game camera too. Rolls and Leap of Faith use their normal camera motion.");
+    if(!nativeYawSupported)ImGui::TextWrapped("Native camera update could not be verified; turning limits are unavailable.");
     ImGui::SliderFloat("Head smoothing",&draft.smoothing,0.01f,0.3f,"%.3f seconds",ImGuiSliderFlags_AlwaysClamp);
     ImGui::Checkbox("Follow Leap of Faith",&draft.followLeap);
     ImGui::Checkbox("Follow recognized ground rolls",&draft.followMotion);
@@ -563,7 +571,7 @@ void Menu(loader::Gui& gui) {
             toggleKey=draft.key;fovDegrees=draft.fov;headEyeHeight=draft.eyeHeight;
             headForward=draft.forward;headHalfLife=draft.smoothing;collisionPadding=draft.padding;
             collisionRadius=draft.radius;hideHead=draft.hideHead;collisionEnabled=draft.collision;
-            autoThirdPerson=draft.automatic;
+            autoThirdPerson=draft.automatic;headTurnLimit=draft.headTurnLimit;
             followLeapOfFaith=draft.followLeap;followCombatMotion=draft.followMotion;combatFraming=draft.combat;combatEyeHeight=draft.combatHeight;
             combatForward=draft.combatForward;combatFov=draft.combatFov;cameraEpoch.fetch_add(1);
             ReleaseSRWLockExclusive(&settingsLock);
@@ -578,11 +586,13 @@ void Menu(loader::Gui& gui) {
     if(status[0])ImGui::TextWrapped("%s",status);
     ImGui::PopID();
 }
+void InstallNativeYaw();
 void Frame(loader::Gui& gui) {
     if(BindGui(gui)&&(ImGui::GetIO().WantCaptureKeyboard||ImGui::GetIO().WantCaptureMouse))menuSeen=GetTickCount64();
     if (!faulted.load()) {
         UpdateHotkey();
         InstallOnCurrentCamera();
+        InstallNativeYaw();
     }
     UpdateHeadVisibility();
     static bool reportedCollisionReady=false;
@@ -595,6 +605,112 @@ void Frame(loader::Gui& gui) {
         reported=mode;
         Log(mode==2?"Anchor: smoothed animated head.":"Anchor: briefly held/eased fallback (head unavailable).");
     }
+}
+// Camera behavior tables use a dispatch pointer at +8, not the component's
+// C++ vtable at +0. Keep each published clone resident for the process lifetime.
+using YawMode=bool(__fastcall*)(void*);
+struct YawTable {
+ std::uintptr_t node=0;
+ void** original=nullptr;
+ alignas(16) void* storage[kTableSlots+1]{};
+};
+YawTable yawTables[32]{};
+std::atomic<unsigned> yawTableCount{0};
+bool VerifyNativeYawSite() {
+ unsigned char site[19]{},helper[14]{};
+ const auto ret=base+gameBuild->yawFinalizeReturn;
+ for(unsigned i=0;i<sizeof(site);++i)if(!Read(ret-12+i,site[i]))return false;
+ for(unsigned i=0;i<sizeof(helper);++i)if(!Read(base+gameBuild->yawModeHelper+i,helper[i]))return false;
+ return fp::NativeYawSiteMatches(ret,base+gameBuild->yawModeHelper,site,helper);
+}
+void LimitNativeYaw(std::uintptr_t camera) {
+ struct State {
+  fp::NativeYawLimit limit;
+  std::uintptr_t camera=0,entity=0;
+  unsigned epoch=0;
+  ULONGLONG tick=0,logTime=0;
+ };
+ static thread_local State state;
+ const auto now=GetTickCount64();
+ std::uintptr_t entity=0;fp::Vec3 body{},head{};
+ float current=0,target=0;
+ if(!Read(camera+0x10,entity)||!entity||!Read(entity+0x30,body)||!fp::Finite(body)||
+    body.x*body.x+body.y*body.y<0.0001f||!Read(camera+0x94C,current)||!Read(camera+0x950,target)) {
+  state=State{};return;
+ }
+ const auto read=[](std::uintptr_t address,auto& value){return Read(address,value);};
+ bool roll=false,leap=false;
+ fp::ReadCombat(read,base,entity,&roll,&leap,*gameBuild);
+ if(roll||leap||!fp::ReadHead(read,base,entity,head,*gameBuild)) {state=State{};return;}
+ const auto epoch=cameraEpoch.load();
+ if(state.camera!=camera||state.entity!=entity||state.epoch!=epoch||now-state.tick>250)state=State{};
+ state.camera=camera;state.entity=entity;state.epoch=epoch;state.tick=now;
+ const float bodyYaw=std::atan2(-body.x,body.y);
+ const float previousCurrent=current,previousTarget=target;
+ if(!state.limit.Step(current,target,bodyYaw,headTurnLimit*fp::Pi/180)) {state=State{};return;}
+ // Only touch the orbit fields. Unity builds all downstream transforms itself.
+ if(current!=previousCurrent||target!=previousTarget) {
+  __try {
+   *reinterpret_cast<float*>(camera+0x94C)=current;
+   *reinterpret_cast<float*>(camera+0x950)=target;
+  } __except(EXCEPTION_EXECUTE_HANDLER) {
+   faulted.store(true);enabled.store(false);state=State{};return;
+  }
+ }
+ if(now-state.logTime>=1000) {
+  state.logTime=now;
+  char message[256]{};
+  sprintf_s(message,"NativeYaw: body=%.1f current=%.1f target=%.1f output=%.1f relative=%.1f limit=%.1f stop=%d",
+      bodyYaw*180/fp::Pi,previousCurrent*180/fp::Pi,previousTarget*180/fp::Pi,
+      fp::Wrap(fp::Pi-current)*180/fp::Pi,state.limit.relative*180/fp::Pi,headTurnLimit,state.limit.atLimit?1:0);
+  Log(message);
+ }
+}
+bool __fastcall NativeYawMode(void* self) {
+ const auto returnAddress=reinterpret_cast<std::uintptr_t>(_ReturnAddress());
+ void** table=nullptr;
+ const auto node=reinterpret_cast<std::uintptr_t>(self);
+ if(!Read(node+8,table))return false;
+ const auto count=yawTableCount.load(std::memory_order_acquire);
+ for(unsigned i=0;i<count;++i) {
+  auto& entry=yawTables[i];
+  if(table!=entry.storage+1)continue;
+  const auto method=reinterpret_cast<YawMode>(entry.original[0x150/8]);
+  if(returnAddress==base+gameBuild->yawFinalizeReturn&&enabled.load()&&!faulted.load()&&GameFocused()&&!MenuOpen()) {
+   const auto camera=reinterpret_cast<std::uintptr_t>(LocalCamera());
+   std::uintptr_t ownerNode=0;
+   if(camera&&Read(camera+0x9C0,ownerNode)&&ownerNode==node) {
+    AcquireSRWLockShared(&settingsLock);
+    const auto last=lastApplied.load();
+    if(headTurnLimit<180&&last&&GetTickCount64()-last<200)LimitNativeYaw(camera);
+    ReleaseSRWLockShared(&settingsLock);
+   }
+  }
+  return method(self);
+ }
+ return false;
+}
+void InstallNativeYaw() {
+ if(!nativeYawSupported)return;
+ const auto camera=reinterpret_cast<std::uintptr_t>(LocalCamera());
+ std::uintptr_t node=0;void** table=nullptr;
+ if(!camera||!Read(camera+0x9C0,node)||!node||(node+8)%alignof(void*)||!Read(node+8,table)||!table)return;
+ const auto count=yawTableCount.load(std::memory_order_acquire);
+ for(unsigned i=0;i<count;++i) {
+  if(table==yawTables[i].storage+1)return;
+  if(table==yawTables[i].original) {
+   SwapTable(reinterpret_cast<void*>(node+8),table,yawTables[i].storage+1);return;
+  }
+ }
+ if(count>=32)return;
+ auto& entry=yawTables[count];
+ __try {std::memcpy(entry.storage,table-1,sizeof(entry.storage));}
+ __except(EXCEPTION_EXECUTE_HANDLER) {return;}
+ if(!InGameImage(entry.storage[0x150/8+1]))return;
+ entry.node=node;entry.original=table;
+ entry.storage[0x150/8+1]=reinterpret_cast<void*>(&NativeYawMode);
+ yawTableCount.store(count+1,std::memory_order_release);
+ if(SwapTable(reinterpret_cast<void*>(node+8),table,entry.storage+1))Log("Native yaw callback attached before view/movement transforms.");
 }
 bool Ready(loader::Interface&) {
     if (!SupportedBuild()) { Log("Unsupported executable; plugin dormant, no camera writes."); return false; }
@@ -620,13 +736,13 @@ bool Ready(loader::Interface&) {
     headEyeHeight=Setting(L"HeadEyeHeight",0.12f,-0.2f,0.4f);
     headForward=Setting(L"HeadForward",0.16f,-0.1f,0.3f);
     headHalfLife=Setting(L"HeadSmoothingHalfLife",0.07f,0.01f,0.3f);
-    maxLookYaw=Setting(L"MaxLookYaw",80,30,85)*fp::Pi/180;
-    maxLookDown=Setting(L"MaxLookDown",60,20,75)*fp::Pi/180;
-    maxLookUp=Setting(L"MaxLookUp",70,20,85)*fp::Pi/180;
+    headTurnLimit=Setting(L"HeadTurnLimit",180,0,180);
     autoThirdPerson=GetPrivateProfileIntW(L"Camera",L"AutoThirdPerson",0,iniPath)!=0;
     collisionEnabled=GetPrivateProfileIntW(L"Camera",L"CollisionGuard",1,iniPath)!=0;
     collisionPadding=Setting(L"CollisionPadding",0.12f,0.05f,0.3f);
     collisionRadius=Setting(L"CollisionRadius",0.16f,0.03f,0.25f);
+    nativeYawSupported=VerifyNativeYawSite();
+    Log(nativeYawSupported?"Native yaw update verified.":"Native yaw update unrecognized: limits unavailable.");
     Log("Prototype 0.8.5 ready: configurable key and camera settings in plugin menu. Starts OFF.");
     return true;
 }

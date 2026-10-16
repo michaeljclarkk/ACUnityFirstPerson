@@ -17,13 +17,14 @@ inline Quat FromYawPitch(float yaw,float pitch) {
 struct LookController {
  float previousYaw=0,previousBody=0,relative=0,pitch=0;
  bool atLimit=false;
- bool Step(Quat input,Vec3 body,float,float,float,Quat& output) {
+ bool Step(Quat input,Vec3 body,Quat& output) {
   Vec3 forward{};
   if(!EyePosition({0,0,0},input,0,1,forward)||!Finite(body))return false;
   previousYaw=std::atan2(-forward.x,forward.y);
   previousBody=std::atan2(-body.x,body.y);
   relative=Wrap(previousYaw-previousBody);
   pitch=std::asin(std::clamp(forward.z,-1.0f,1.0f));
+  atLimit=false;
   output=FromYawPitch(previousYaw,pitch);
   return true;
  }

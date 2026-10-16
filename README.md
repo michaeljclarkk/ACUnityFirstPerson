@@ -80,6 +80,7 @@ else you have installed, rebind the toggle in the menu.
 | `HeadForward` | `0.16` | Eye forward offset, in metres. |
 | `EyeHeight` | `1.65` | Fallback eye height used when head tracking drops out. |
 | `VerticalFOV` | `70` | Vertical FOV in degrees, `40`-`100`. `0` keeps the game's native FOV. |
+| `HeadTurnLimit` | `180` | Maximum yaw from body forward in either direction, `0`-`180` degrees. `90` = 180 total; `180` allows looking straight behind and is unrestricted. |
 | `HeadSmoothingHalfLife` | `0.07` | Animation smoothing half-life in seconds. Raise it to calm fast poses. |
 | `HideHead` | `1` | Hide the head/hood in the main view. Shadows are preserved. |
 | `CollisionGuard` | `1` | Probe for geometry and pull the camera back instead of clipping. |
@@ -92,6 +93,16 @@ else you have installed, rebind the toggle in the menu.
 | `CombatVerticalFOV` | `80` | Combat vertical FOV. Wider existing FOVs are preserved. |
 | `FollowCombatMotion` | `1` | Follow recognised ground rolls. Ordinary combat keeps native aim. |
 | `FollowLeapOfFaith` | `1` | Follow the Leap of Faith dive, independently of the combat options. |
+
+The **Head turn limit (left / right)** slider updates Unity's native current and
+target orbit before it builds the view and movement headings. Excess mouse input
+is discarded at the stop, so reversing does not need to unwind it. The rendered
+view follows the resulting native camera; it has no separate yaw clamp. Use
+**Save & apply** to save and apply without restarting. Arno turns using the game's
+normal movement behavior; this setting does not directly rotate the character.
+Recognized ground rolls and Leap of Faith bypass the restriction. Automatic
+third-person fallback can still take over if enabled. If the native update path
+cannot be verified, the slider is disabled and game turning is preserved.
 
 `MaxLookYaw`, `MaxLookDown`, `MaxLookUp` and `ForwardOffset` are kept only so old
 configurations load cleanly. They are inactive.
