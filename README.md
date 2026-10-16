@@ -29,10 +29,7 @@ the ACUFixes Plugin Loader.
 
 ## Requirements
 
-- Assassin's Creed Unity, PC, 64-bit. Recognized executables:
-  - 1.5.0: SHA-256 `748ABDC6456397FE7D8080F975F2A5ED3123BCE548E7BF1C68B23F47E8B27E40`.
-  - 1.5.1: SHA-256 `9725F1FB9E82521506007EE50763612D319A02EEFC48E09D8EB845DFF4BBCD87`.
-  Unknown fingerprints remain rejected before camera writes.
+- Assassin's Creed Unity.
 - [ACUFixes Plugin Loader](https://github.com/NameTaken3125/ACUFixes) installed and working
   (0.9.2 for 1.5.0; use the [1.5.1 loader port](https://github.com/antr1x/ACUFixes/releases/tag/v0.9.4.0-hf3)
   for 1.5.1). This plugin does nothing on its own.
