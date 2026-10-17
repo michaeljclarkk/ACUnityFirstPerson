@@ -122,4 +122,13 @@ jobs:
             ''
             'See the bundled `README.md` for every setting and `CHANGELOG.md` for what changed.'
           ) | Set-Content -LiteralPath $notes -Encoding utf8
-          gh release create $env:RELEASE_TAG $zip --title "ACUnityFirstPerson $env:VERSION" --notes-file $notes --verify-tag
+          gh release view $env:RELEASE_TAG --json tagName *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release edit $env:RELEASE_TAG --title "ACUnityFirstPerson $env:VERSION" --notes-file $notes --verify-tag
+            if ($LASTEXITCODE -ne 0) { throw "Failed to update the existing GitHub release $env:RELEASE_TAG." }
+            gh release upload $env:RELEASE_TAG $zip --clobber
+            if ($LASTEXITCODE -ne 0) { throw "Failed to replace the ZIP on GitHub release $env:RELEASE_TAG." }
+          } else {
+            gh release create $env:RELEASE_TAG $zip --title "ACUnityFirstPerson $env:VERSION" --notes-file $notes --verify-tag
+            if ($LASTEXITCODE -ne 0) { throw "Failed to create GitHub release $env:RELEASE_TAG." }
+          }
