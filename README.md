@@ -7,9 +7,6 @@ Press **.** to toggle first person. The camera follows Arno's animated head, hid
 and hood from the main view while keeping his cast shadow, and pulls back automatically when
 you run into geometry.
 
-> **Status: 0.8.6 — 1.5.1 compatibility testing.** Separate executable profiles preserve
-> 1.5.0 support. The 1.5.1 gameplay port needs walking, combat, parkour and dive validation.
-
 ![First-person rooftop view in Assassin's Creed Unity](acu-repo-hero.png)
 
 ## Current local mod and visual setup
