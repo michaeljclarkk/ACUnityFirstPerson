@@ -497,7 +497,7 @@ void Menu(loader::Gui& gui) {
         draft.combatForward=combatForward;draft.combatFov=combatFov;initialized=true;
     }
     ImGui::PushID("ACUnityFirstPerson");
-    ImGui::TextUnformatted("First Person 0.8.5");
+    ImGui::TextUnformatted("First Person 0.8.6");
     bool on=enabled.load();
     ImGui::BeginDisabled(faulted.load());
     if(ImGui::Checkbox("First person enabled",&on)) {
@@ -627,7 +627,7 @@ bool Ready(loader::Interface&) {
     collisionEnabled=GetPrivateProfileIntW(L"Camera",L"CollisionGuard",1,iniPath)!=0;
     collisionPadding=Setting(L"CollisionPadding",0.12f,0.05f,0.3f);
     collisionRadius=Setting(L"CollisionRadius",0.16f,0.03f,0.25f);
-    Log("Prototype 0.8.5 ready: configurable key and camera settings in plugin menu. Starts OFF.");
+    Log("Prototype 0.8.6 ready: configurable key and camera settings in plugin menu. Starts OFF.");
     return true;
 }
 }

@@ -2,20 +2,10 @@
 
 Reverse-chronological development notes. Newest first.
 
-## Unreleased — combat roll tracking
+## 0.8.6 — AC Unity 1.5.1 compatibility candidate
 
-Recognize the ACU 1.5.0 and 1.5.1 combat-roll states so the camera follows torso rotation
-and head movement. The existing **Follow recognized rolls** option controls both
-ground and combat rolls, using the saved `FollowCombatMotion` setting. Ordinary
-attacks, parries and hit reactions retain native aim. The 1.5.1 mapping uniquely
-matches the 1.5.0 function across 255 signature bytes and 285 instructions, with
-relocated call targets and data references excluded from comparison.
-
-Gameplay confirmed roll tracking on 1.5.0; 1.5.1 gameplay confirmation is pending.
-Regression tests replay captured 1.5.0 rolls through both version profiles,
-including inverted poses and recovery, verify disabling the option preserves native aim,
-and check setting persistence and executable-version isolation. Temporary capture
-code and diagnostic menu controls are removed.
+Add head left / right yaw limit. Configured in the GUI as its own option. 180* allows full rotation. 
+This Version also workds on the camera following the rolls during combat. 
 
 ## 0.8.5 — AC Unity 1.5.1 compatibility candidate
 
