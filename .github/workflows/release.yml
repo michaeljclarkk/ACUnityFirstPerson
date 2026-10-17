@@ -62,6 +62,38 @@ jobs:
         shell: pwsh
         run: .\scripts\package.ps1 -SkipBuild
 
+      - name: Check Nexus publishing configuration
+        if: ${{ vars.NEXUSMODS_FILE_ID != '' }}
+        shell: pwsh
+        env:
+          NEXUSMODS_API_KEY: ${{ secrets.NEXUSMODS_API_KEY }}
+          NEXUSMODS_FILE_ID: ${{ vars.NEXUSMODS_FILE_ID }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:NEXUSMODS_API_KEY)) { throw 'NEXUSMODS_API_KEY is missing from repository secrets.' }
+          if ($env:NEXUSMODS_FILE_ID -notmatch '^\d+$') { throw "NEXUSMODS_FILE_ID must be a numeric Nexus file ID, got '$env:NEXUSMODS_FILE_ID'." }
+
+      - name: Upload to Nexus Mods
+        if: ${{ vars.NEXUSMODS_FILE_ID != '' }}
+        uses: Nexus-Mods/upload-action@v1.0.0-beta.11
+        with:
+          api_key: ${{ secrets.NEXUSMODS_API_KEY }}
+          file_id: ${{ vars.NEXUSMODS_FILE_ID }}
+          filename: dist/ACUnityFirstPerson-${{ steps.release.outputs.version }}.zip
+          version: ${{ steps.release.outputs.version }}
+          display_name: ACUnityFirstPerson ${{ steps.release.outputs.version }}
+          description: See the bundled README.md and CHANGELOG.md for installation and release details.
+          category: main
+          archive_existing_version: true
+          primary_mod_manager_download: true
+          allow_mod_manager_download: true
+          show_requirements_pop_up: true
+          update_mod_version: true
+
+      - name: Report skipped Nexus publishing
+        if: ${{ vars.NEXUSMODS_FILE_ID == '' }}
+        shell: pwsh
+        run: Write-Warning 'Nexus publishing skipped. Configure the NEXUSMODS_API_KEY secret and NEXUSMODS_FILE_ID repository variable to enable it.'
+
       - name: Publish the release
         shell: pwsh
         env:
