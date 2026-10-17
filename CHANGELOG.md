@@ -2,7 +2,7 @@
 
 Reverse-chronological development notes. Newest first.
 
-## Unreleased � native camera yaw limits
+## Unreleased — native camera yaw limits
 
 Adds the Head turn limit (left / right) slider and persistent HeadTurnLimit key.
 Range is 0-180 degrees per side: 90 means directly left/right, 180 straight behind
@@ -11,7 +11,8 @@ constructs its view and movement quaternions. A local camera behavior-table clon
 intercepts only the verified finalization call; no executable instructions change.
 Each executable profile has separately verified call-site/helper addresses.
 Unknown code or a foreign behavior callback leaves the game camera unchanged.
-Ground rolls and Leap of Faith bypass the restriction. Settings apply on save.
+Recognized ground/combat rolls and Leap of Faith bypass the restriction.
+Settings apply on save.
 
 Replaces both failed output-only approaches. They allowed the underlying camera
 to continue rotating, causing retained movement offsets or 170-176 degree snaps.
@@ -20,6 +21,21 @@ runs opposite to view yaw (view yaw = pi - orbit); confirmed by live read-only
 sampling. Regression tests simulate feedback through repeated stop pressure,
 reversal, rear-seam overshoot, body catch-up and world/body angle wrapping.
 Gameplay validation of the new native callback remains pending.
+
+## Unreleased — combat roll tracking
+
+Recognize the ACU 1.5.0 and 1.5.1 combat-roll states so the camera follows torso rotation
+and head movement. The existing **Follow recognized rolls** option controls both
+ground and combat rolls, using the saved `FollowCombatMotion` setting. Ordinary
+attacks, parries and hit reactions retain native aim. The 1.5.1 mapping uniquely
+matches the 1.5.0 function across 255 signature bytes and 285 instructions, with
+relocated call targets and data references excluded from comparison.
+
+Gameplay confirmed roll tracking on 1.5.0; 1.5.1 gameplay confirmation is pending.
+Regression tests replay captured 1.5.0 rolls through both version profiles,
+including inverted poses and recovery, verify disabling the option preserves native aim,
+and check setting persistence and executable-version isolation. Temporary capture
+code and diagnostic menu controls are removed.
 
 ## 0.8.5 — AC Unity 1.5.1 compatibility candidate
 

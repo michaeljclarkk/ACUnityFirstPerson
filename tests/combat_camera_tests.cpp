@@ -1,4 +1,6 @@
 #include "combat_camera.h"
+#include "body_motion.h"
+#include "recorded_combat_rolls.h"
 #include <array>
 #include <cstring>
 #include <cstdio>
@@ -54,6 +56,70 @@ int main() {
  bool groundRoll=false;
  m.put(node+0xE0,base+0x1A69680);
  Check(fp::ReadCombat(m,base,entity,&groundRoll)==fp::CombatState::Clear&&groundRoll,"ground roll recognized independently of combat");
+ // Roll orientation is enabled by the recorded callback, without widening combat detection.
+ m.put(node+0xE0,base+0x19A2050);
+ Check(fp::ReadCombat(m,base,entity,&groundRoll)==fp::CombatState::Clear&&groundRoll,"recorded 1.5.0 combat roll enables orientation");
+ fp::ReadCombat(m,base,entity,&groundRoll,nullptr,fp::Build151);
+ Check(!groundRoll,"recorded callback cannot leak into 1.5.1");
+ fp::GameBuild unmapped=fp::Build151;unmapped.combatRoll=0;
+ m.put(node+0xE0,base);
+ fp::ReadCombat(m,base,entity,&groundRoll,nullptr,unmapped);
+ Check(!groundRoll,"unmapped zero combat-roll RVA is never recognized");
+ m.put(node+0xE0,base+0x19A1800);
+ Check(fp::ReadCombat(m,base,entity,&groundRoll,nullptr,fp::Build151)==fp::CombatState::Clear&&groundRoll,"code-matched 1.5.1 combat roll enables orientation");
+ fp::ReadCombat(m,base,entity,&groundRoll,nullptr,fp::Build150);
+ Check(!groundRoll,"1.5.1 combat roll cannot leak into 1.5.0");
+ for(const auto* profile:{&fp::Build150,&fp::Build151}) {
+  m.put(node+0xE0,base+profile->roll);
+  fp::ReadCombat(m,base,entity,&groundRoll,nullptr,*profile);
+  Check(groundRoll,"original ground roll retained on both builds");
+  for(const auto address:profile->combat) {
+   m.put(node+0xE0,base+address);
+   fp::ReadCombat(m,base,entity,&groundRoll,nullptr,*profile);
+   Check(!groundRoll,"parry and other combat callbacks cannot enable roll orientation");
+  }
+ }
+ auto replaced=[&](std::uintptr_t p,auto& value){
+  if(!m(p,value))return false;
+  if(p==holder+0x1BA)m.put(holder+0x1B0,std::uintptr_t(receivers+0x100));
+  return true;
+ };
+ m.put(node+0xE0,base+0x19A2050);
+ fp::ReadCombat(replaced,base,entity,&groundRoll);
+ Check(!groundRoll,"replaced state list cannot publish a roll");
+ m.put(holder+0x1B0,receivers);
+ // Replay 1.5.0 poses through both version-specific gates; this is not a 1.5.1 gameplay capture.
+ for(const auto* profile:{&fp::Build150,&fp::Build151}) {
+  fp::BodyMotion replay,disabledReplay;
+  int sequence=-1,lastMs=0,invertedFrames=0;
+  float worstUpError=0;
+  for(const auto& sample:RecordedRolls) {
+   if(sample.sequence!=sequence){replay={};disabledReplay={};sequence=sample.sequence;lastMs=sample.timeMs-47;}
+   const float dt=(sample.timeMs-lastMs)/1000.0f;lastMs=sample.timeMs;
+   m.put(node+0xE0,base+(sample.roll?profile->combatRoll:profile->combat[1]));
+   fp::ReadCombat(m,base,entity,&groundRoll,nullptr,*profile);
+   const bool follow=fp::FollowRoll(true,groundRoll,true);
+   Check(follow==sample.roll,"recorded state changes reach the camera motion gate");
+   const float yaw=std::atan2(-sample.body.x,sample.body.y);
+   const bool disabledFollow=fp::FollowRoll(false,groundRoll,true);
+   Check(!disabledFollow,"disabled motion setting rejects recorded combat rolls");
+   Check(!fp::FollowRoll(true,groundRoll,false),"missing head cannot enable recorded combat rolls");
+   const auto disabledCorrection=disabledReplay.Step(sample.torso,true,yaw,disabledFollow?1.0f:0.0f,dt);
+   Check(fp::DistanceSquared(fp::Rotate(disabledCorrection,{0,1,0}),{0,1,0})<0.000001f,"disabled motion setting preserves native aim throughout recorded rolls");
+   const auto correction=replay.Step(sample.torso,true,yaw,follow?1.0f:0.0f,dt);
+   const auto output=fp::Multiply(correction,fp::FromYawPitch(yaw,0));
+   const auto wantedUp=fp::Rotate(sample.torso,{0,0,1});
+   const auto actualUp=fp::Rotate(output,{0,0,1});
+   if(follow) {
+    worstUpError=std::max(worstUpError,std::acos(std::clamp(fp::Dot(wantedUp,actualUp),-1.0f,1.0f)));
+    if(wantedUp.z < -0.1f){++invertedFrames;Check(actualUp.z<0,"camera follows recorded inverted torso instead of remaining upright");}
+   }
+  }
+  Check(invertedFrames>=8,"both recorded tumbles exercise inverted camera tracking");
+  Check(worstUpError<15*fp::Pi/180,"recorded roll tracking stays within 15 degrees of torso up");
+  for(int i=0;i<120;++i)replay.Step({},false,0,0,1/60.0f);
+  Check(fp::Rotate(replay.applied,{0,0,1}).z>0.999f,"recorded roll recovery returns upright");
+ }
  m.put(node+0xE0,base+0x1A93DF0);
  Check(fp::ReadCombat(m,base,entity)==fp::CombatState::Clear,"hanging is not combat");
  m.put(node+0xE0,base+0x1A462F0);
