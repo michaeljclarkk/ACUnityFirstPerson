@@ -39,6 +39,9 @@ int main(){
  s.key='V';s.fov=0;
  Check(fp::SaveSettings(path,s),"native FOV permitted");
  Check(GetPrivateProfileIntW(L"Camera",L"VerticalFOV",-1,path)==0,"native FOV persists");
+ s.followMotion=true;
+ Check(fp::SaveSettings(path,s),"roll tracking can be enabled again");
+ Check(GetPrivateProfileIntW(L"Camera",L"FollowCombatMotion",0,path)==1,"enabled roll tracking persists");
  Check(GetFileAttributesW((std::wstring(path)+L".tmp").c_str())==INVALID_FILE_ATTRIBUTES,"no temporary file left");
  DeleteFileW(path);
  std::puts("Settings validation, key restrictions, persistence and config preservation passed.");

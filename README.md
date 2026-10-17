@@ -87,7 +87,7 @@ else you have installed, rebind the toggle in the menu.
 | `CombatEyeHeight` | `-0.06` | Combat eye height relative to the tracked head. |
 | `CombatForward` | `0.02` | Combat forward offset. |
 | `CombatVerticalFOV` | `80` | Combat vertical FOV. Wider existing FOVs are preserved. |
-| `FollowCombatMotion` | `1` | Follow recognised ground rolls. Ordinary combat keeps native aim. |
+| `FollowCombatMotion` | `1` | Follow recognised ground and combat rolls. Ordinary combat keeps native aim. Combat rolls are gameplay verified on 1.5.0; 1.5.1 testing is pending. |
 | `FollowLeapOfFaith` | `1` | Follow the Leap of Faith dive, independently of the combat options. |
 
 `MaxLookYaw`, `MaxLookDown`, `MaxLookUp` and `ForwardOffset` are kept only so old

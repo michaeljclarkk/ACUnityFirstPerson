@@ -534,8 +534,8 @@ void Menu(loader::Gui& gui) {
     ImGui::SliderFloat("Eye forward adjustment",&draft.forward,-0.1f,0.3f,"%.2f m",ImGuiSliderFlags_AlwaysClamp);
     ImGui::SliderFloat("Head smoothing",&draft.smoothing,0.01f,0.3f,"%.3f seconds",ImGuiSliderFlags_AlwaysClamp);
     ImGui::Checkbox("Follow Leap of Faith",&draft.followLeap);
-    ImGui::Checkbox("Follow recognized ground rolls",&draft.followMotion);
-    ImGui::TextWrapped("Follows only the recognized ground-roll state. Attacks and spinning moves keep your normal aim. Unrecognized dodges stay upright.");
+    ImGui::Checkbox("Follow recognized rolls",&draft.followMotion);
+    ImGui::TextWrapped("Rotate the camera with recognized ground and combat rolls. Ordinary attacks and parries keep your normal aim.");
     ImGui::Checkbox("Combat framing",&draft.combat);
     if(ImGui::TreeNode("Combat view")) {
         ImGui::TextWrapped("Lowers the eye and widens the view during combat to show more arms and weapon movement. Changes blend smoothly. Field of view never narrows an already wider view.");

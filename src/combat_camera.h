@@ -9,6 +9,11 @@ inline bool CombatEnter(std::uintptr_t rva,const GameBuild& build=Build150) {
  for(const auto address:build.combat)if(rva==address)return true;
  return false;
 }
+// Combat-roll Enter callbacks: gameplay verified on 1.5.0, code matched on 1.5.1.
+// Keep this separate from general combat so parries/hit reactions cannot enable it.
+inline bool RollEnter(std::uintptr_t rva,const GameBuild& build=Build150) {
+ return rva==build.roll||(build.combatRoll&&rva==build.combatRoll);
+}
 // Captured during the user's Leap of Faith: safe-airborne node's action
 // type getter is RVA 194D00 (mov eax,70h; ret). No game function is called.
 template<class Reader>
@@ -38,7 +43,7 @@ CombatState ReadCombat(Reader read,std::uintptr_t base,std::uintptr_t entity,boo
   std::uintptr_t node=0,enter=0;
   if(!read(receivers+16*i+8,node)||!node||!read(node+0xE0,enter))return CombatState::Unknown;
   if(enter>=base&&CombatEnter(enter-base,build))foundCombat=true;
-  if(enter==base+build.roll)foundRoll=true;
+  if(enter>=base&&RollEnter(enter-base,build))foundRoll=true;
   if(enter==base+build.leap&&LeapAction(read,base,node,build))foundLeap=true;
  }
  // Reject a replaced list instead of using a partial transition snapshot.
