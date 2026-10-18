@@ -85,7 +85,7 @@ else you have installed, rebind the toggle in the menu.
 | `CombatForward` | `0.02` | Combat forward offset. |
 | `CombatVerticalFOV` | `80` | Combat vertical FOV. Wider existing FOVs are preserved. |
 | `FollowCombatMotion` | `1` | Follow recognised ground and combat rolls. Ordinary combat keeps native aim. Combat rolls are gameplay verified on 1.5.0; 1.5.1 testing is pending. |
-| `FollowParkourSpins` | `1` | Experimental 1.5.0 camera follow for 493 catalogued parkour turn, roll, swing and descent candidates, including downward vaults, reverse grinds and 180-degree climb exits. Uses actual pose sampling; full gameplay validation is pending. Unavailable on 1.5.1. |
+| `FollowParkourSpins` | `1` | Camera follow for 493 catalogued parkour turn, roll, swing and descent candidates, including downward vaults, reverse grinds and 180-degree climb exits. Uses actual pose sampling.
 | `FollowLeapOfFaith` | `1` | Follow the Leap of Faith dive, independently of the combat options. |
 
 `MaxLookYaw`, `MaxLookDown`, `MaxLookUp` and `ForwardOffset` are kept only so old
