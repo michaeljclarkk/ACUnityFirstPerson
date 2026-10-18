@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(ACUnityFirstPerson VERSION 0.8.6 LANGUAGES CXX)
+project(ACUnityFirstPerson VERSION 0.8.7 LANGUAGES CXX)
 if(NOT WIN32 OR NOT MSVC OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
   message(FATAL_ERROR "Use 64-bit Windows and the Visual Studio C++ compiler.")
 endif()

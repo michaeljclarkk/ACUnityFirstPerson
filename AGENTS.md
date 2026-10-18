@@ -51,19 +51,4 @@ To produce the Nexus release archive (builds, verifies the version strings agree
 The installer and uninstaller take a mandatory `-GamePath`, e.g.
 `.\scripts\install.ps1 -GamePath "D:\Steam\steamapps\common\Assassin's Creed Unity"`.
 
-## Releasing
 
-Only Do when explicitly asked. The worst thing that you can do is update the changlelogs / release without explicit confirmation from the user. 
-
-Push a `v<version>` tag and `.github/workflows/release.yml` builds, tests, packages and
-publishes the GitHub release. It refuses to run if the tag disagrees with the version in
-`CMakeLists.txt`, so bump all three version strings and commit before tagging.
-
-```powershell
-git tag v0.8.4
-git push origin v0.8.4
-```
-
-The workflow runs on `windows-2025`, which ships Visual Studio 2026 to match the local
-toolchain. It uses the default CMake generator rather than the hardcoded one in
-`build.ps1`, then calls `package.ps1 -SkipBuild` so packaging logic has a single home.

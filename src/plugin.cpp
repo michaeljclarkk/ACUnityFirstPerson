@@ -617,7 +617,7 @@ void Menu(loader::Gui& gui) {
         draft.combatForward=combatForward;draft.combatFov=combatFov;initialized=true;
     }
     ImGui::PushID("ACUnityFirstPerson");
-    ImGui::TextUnformatted("First Person 0.8.6");
+    ImGui::TextUnformatted("First Person 0.8.7");
     bool on=enabled.load();
     ImGui::BeginDisabled(faulted.load());
     if(ImGui::Checkbox("First person enabled",&on)) {
@@ -783,7 +783,7 @@ bool Ready(loader::Interface&) {
     collisionRadius=Setting(L"CollisionRadius",0.16f,0.03f,0.25f);
     parkourObserverReady.store(InstallParkourObserver());
     if(!parkourObserverReady.load())Log("Parkour observer unavailable: normal camera and existing roll/leap tracking retained.");
-    Log("Prototype 0.8.6 ready: configurable key and camera settings in plugin menu. Starts OFF.");
+    Log("Prototype 0.8.7 ready: configurable key and camera settings in plugin menu. Starts OFF.");
     return true;
 }
 }
