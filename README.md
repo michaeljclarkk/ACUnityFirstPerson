@@ -30,7 +30,7 @@ the ACUFixes Plugin Loader.
 - [ACUFixes Plugin Loader](https://github.com/NameTaken3125/ACUFixes) installed and working
   (0.9.2 for 1.5.0; use the [1.5.1 loader port](https://github.com/antr1x/ACUFixes/releases/tag/v0.9.4.0-hf3)
   for 1.5.1). This plugin does nothing on its own.
-- DirectX / ReShade and other plugin-loader mods are fine; parkour tracking observes shared animation pose callbacks on 1.5.0 and filters them to the local player.
+- DirectX / ReShade and other plugin-loader mods are fine; parkour tracking observes shared animation pose callbacks and filters them to the local player.
 
 ## Installation
 
