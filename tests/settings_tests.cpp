@@ -12,8 +12,9 @@ int main(){
  Check(GetTempFileNameW(directory,L"acu",0,path)!=0,"isolated test file");
  Check(WritePrivateProfileStringW(L"Camera",L"OtherModSetting",L"preserve",path)!=FALSE,"seed unrelated setting");
  s.key=VK_F8;s.fov=82;s.hideHead=false;s.automatic=true;
- s.followLeap=false;s.followMotion=false;s.combat=false;s.combatHeight=-0.12f;s.combatForward=-0.04f;s.combatFov=85;
+ s.followParkour=false;s.followLeap=false;s.followMotion=false;s.combat=false;s.combatHeight=-0.12f;s.combatForward=-0.04f;s.combatFov=85;
  Check(fp::SaveSettings(path,s),"save succeeds");
+ Check(GetPrivateProfileIntW(L"Camera",L"FollowParkourSpins",1,path)==0,"parkour tracking disabled persists");
  Check(GetPrivateProfileIntW(L"Camera",L"ToggleKey",0,path)==VK_F8,"key persisted as integer");
  Check(GetPrivateProfileIntW(L"Camera",L"HideHead",1,path)==0,"boolean persisted");
  Check(GetPrivateProfileIntW(L"Camera",L"AutoThirdPerson",0,path)==1,"fallback persisted");
@@ -39,8 +40,9 @@ int main(){
  s.key='V';s.fov=0;
  Check(fp::SaveSettings(path,s),"native FOV permitted");
  Check(GetPrivateProfileIntW(L"Camera",L"VerticalFOV",-1,path)==0,"native FOV persists");
- s.followMotion=true;
+ s.followParkour=true;s.followMotion=true;
  Check(fp::SaveSettings(path,s),"roll tracking can be enabled again");
+ Check(GetPrivateProfileIntW(L"Camera",L"FollowParkourSpins",0,path)==1,"parkour tracking enabled persists");
  Check(GetPrivateProfileIntW(L"Camera",L"FollowCombatMotion",0,path)==1,"enabled roll tracking persists");
  Check(GetFileAttributesW((std::wstring(path)+L".tmp").c_str())==INVALID_FILE_ATTRIBUTES,"no temporary file left");
  DeleteFileW(path);

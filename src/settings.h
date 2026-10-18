@@ -8,7 +8,7 @@ struct Settings {
  int key=VK_OEM_PERIOD;
  float fov=70,eyeHeight=0.12f,forward=0.16f,smoothing=0.07f,padding=0.12f,radius=0.16f;
  bool hideHead=true,collision=true,automatic=false;
- bool combat=true,followMotion=true,followLeap=true;
+ bool combat=true,followMotion=true,followLeap=true,followParkour=true;
  float combatHeight=-0.06f,combatForward=0.02f,combatFov=80.0f;
 };
 inline bool BindableKey(int k) {
@@ -49,6 +49,7 @@ inline bool SaveSettings(const wchar_t* path,const Settings& s) {
  write(L"VerticalFOV",s.fov);write(L"HeadEyeHeight",s.eyeHeight);write(L"HeadForward",s.forward);
  write(L"HeadSmoothingHalfLife",s.smoothing);write(L"CollisionPadding",s.padding);write(L"CollisionRadius",s.radius);
  const auto flag=[&](const wchar_t* name,bool value){if(!WritePrivateProfileStringW(L"Camera",name,value?L"1":L"0",temporary.c_str()))ok=false;};
+ flag(L"FollowParkourSpins",s.followParkour);
  flag(L"FollowLeapOfFaith",s.followLeap);
  flag(L"FollowCombatMotion",s.followMotion);
  flag(L"CombatFraming",s.combat);

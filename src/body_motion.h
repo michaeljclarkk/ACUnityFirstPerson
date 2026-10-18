@@ -64,6 +64,16 @@ bool ReadTorso(Reader read,std::uintptr_t base,std::uintptr_t entity,Quat& rotat
 }
 // Only explicit roll states authorize animation-driven orientation.
 inline bool FollowRoll(bool enabled,bool groundRoll,bool hasHead) {return enabled&&groundRoll&&hasHead;}
+// Capture the view offset once at entry. Following world-space torso rotation
+// includes root turns without applying native camera yaw a second time.
+struct ParkourView {
+ bool tracking=false;Quat offset{0,0,0,1};
+ Quat Step(Quat torso,Quat view,bool active) {
+  if(!active){tracking=false;return torso;}
+  if(!tracking){offset=Multiply(InverseUnit(torso),view);tracking=true;}
+  return Multiply(torso,offset);
+ }
+};
 struct BodyMotion {
  Quat applied{0,0,0,1};
  Quat Step(Quat torso,bool valid,float bodyYaw,float amount,float dt,const Quat* viewReference=nullptr){

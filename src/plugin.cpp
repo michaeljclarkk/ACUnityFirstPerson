@@ -5,6 +5,7 @@
 #include "settings.h"
 #include "combat_camera.h"
 #include "body_motion.h"
+#include "parkour_tracking.h"
 #include "head_visibility.h"
 #include "imgui.h"
 #include <atomic>
@@ -31,9 +32,17 @@ int toggleKey=VK_OEM_PERIOD;
 ULONGLONG menuSeen=0;
 SRWLOCK settingsLock=SRWLOCK_INIT;
 bool trackHead=true,hideHead=true;
-bool combatFraming=true,followCombatMotion=true,followLeapOfFaith=true;
+bool combatFraming=true,followCombatMotion=true,followLeapOfFaith=true,followParkourSpins=true;
 float combatEyeHeight=-0.06f,combatForward=0.02f,combatFov=80.0f;
 std::atomic<int> combatStatus{0};
+using SamplePose=std::uintptr_t(__fastcall*)(std::uintptr_t,std::uintptr_t,std::uintptr_t);
+SamplePose originalSamplePose=nullptr;
+std::atomic<std::uintptr_t> sampledPlayer{0};
+std::atomic<bool> parkourObserverReady{false};
+std::atomic<std::uint64_t> parkourActiveClip{0};
+SRWLOCK playbackLock=SRWLOCK_INIT;
+fp::ParkourPlayback parkourPlayback;
+fp::ParkourCapture parkourCapture;
 float headEyeHeight=0.12f,headForward=0.16f;
 std::atomic<ULONGLONG> lastApplied{0};
 std::atomic<int> anchorMode{0};
@@ -80,6 +89,108 @@ void* LocalCamera() {
         !Read(manager+0x4A,count) || count==0 || count>16 ||
         !Read(entries,cam)) return nullptr;
     return reinterpret_cast<void*>(cam);
+}
+// Observe pose sampling without changing its arguments, result, or animation state.
+// The DLL is pinned before installing these shared dispatch slots.
+std::uintptr_t __fastcall ObservePose(std::uintptr_t node,std::uintptr_t pose,std::uintptr_t context) {
+    const auto result=originalSamplePose(node,pose,context);
+    const auto player=sampledPlayer.load();
+    if(!enabled.load()||!player)return result;
+    const auto generation=cameraEpoch.load();
+    fp::PoseClipSample sample{};
+    if(fp::ReadPoseClip([](std::uintptr_t address,auto& value){return Read(address,value);},node,context,player,sample)) {
+        AcquireSRWLockExclusive(&playbackLock);
+        parkourPlayback.Observe(sample,generation,GetTickCount64());
+        parkourCapture.Observe(sample);
+        ReleaseSRWLockExclusive(&playbackLock);
+    }
+    return result;
+}
+bool InstallParkourObserver() {
+    // Version-specific entry points, verified against captured code and live dispatch tables.
+    if(!gameBuild||!gameBuild->parkourPose)return false;
+    const auto poseRva=gameBuild->parkourPose;
+    constexpr unsigned char signature[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x48,0x89,0x7C,0x24,0x20,0x41,0x56,0x48,0x83,0xEC,0x30,0x0F,0xB7,0x49,0x64,0x4D,0x8B,0x48,0x20,0x49,0x8B,0xD8,0x49,0x8B,0x81,0x60,0x02,0x00,0x00,0x45,0x8B,0x40,0x44,0xC1,0xE1,0x03,0x48,0x8B,0x34,0x01,0x48,0x8B,0xFA,0x0F,0xB6,0x53,0x12,0x48,0x8B};
+    for(size_t i=0;i<sizeof(signature);++i){unsigned char b=0;if(!Read(base+poseRva+i,b)||b!=signature[i])return false;}
+    IMAGE_DOS_HEADER dos{};IMAGE_NT_HEADERS64 nt{};
+    if(!Read(base,dos)||!Read(base+static_cast<unsigned>(dos.e_lfanew),nt)||nt.FileHeader.NumberOfSections>96)return false;
+    const auto sections=base+static_cast<unsigned>(dos.e_lfanew)+24+nt.FileHeader.SizeOfOptionalHeader;
+    std::uintptr_t textStart=0,textEnd=0;
+    for(unsigned i=0;i<nt.FileHeader.NumberOfSections;++i) {
+        IMAGE_SECTION_HEADER section{};
+        if(!Read(sections+i*sizeof(section),section))return false;
+        if(memcmp(section.Name,".text",5)==0) {
+            const auto rva=static_cast<std::uintptr_t>(section.VirtualAddress);
+            const auto size=static_cast<std::uintptr_t>(section.Misc.VirtualSize);
+            if(rva>=gameBuild->imageSize||size>gameBuild->imageSize-rva)return false;
+            textStart=base+rva;textEnd=textStart+size;
+        }
+    }
+    if(base+poseRva<textStart||base+poseRva+sizeof(signature)>textEnd)return false;
+    void** slots[32]{};size_t count=0;
+    // Only aligned references in .rdata surrounded by game-code function pointers.
+    // Swapping an aligned dispatch pointer avoids rewriting executing instructions.
+    for(unsigned i=0;i<nt.FileHeader.NumberOfSections;++i) {
+        IMAGE_SECTION_HEADER section{};
+        if(!Read(sections+i*sizeof(section),section))return false;
+        if(memcmp(section.Name,".rdata",6)!=0)continue;
+        const auto start=static_cast<std::uintptr_t>(section.VirtualAddress);
+        const auto size=static_cast<std::uintptr_t>(section.Misc.VirtualSize);
+        if(start>=gameBuild->imageSize||size>gameBuild->imageSize-start)return false;
+        for(std::uintptr_t offset=8;offset+16<=size;offset+=8) {
+            std::uintptr_t value=0,before=0,after=0;
+            if(!Read(base+start+offset,value))return false;
+            if(value!=base+poseRva)continue;
+            if(!Read(base+start+offset-8,before)||!Read(base+start+offset+8,after)||
+               before<textStart||before>=textEnd||after<textStart||after>=textEnd||count==32)return false;
+            slots[count++]=reinterpret_cast<void**>(base+start+offset);
+        }
+    }
+    if(!count)return false;
+    originalSamplePose=reinterpret_cast<SamplePose>(base+poseRva);
+    size_t installed=0;
+    for(size_t i=0;i<count;++i) {
+        DWORD protection=0,ignored=0;
+        HANDLE process=nullptr;
+        bool writable=VirtualProtect(slots[i],sizeof(void*),PAGE_READWRITE,&protection)!=FALSE;
+        if(!writable) {
+            const auto localError=GetLastError();
+            // 1.5.1 can reject local protection changes. Match ACUFixes151's
+            // real-process-handle path, but retain the atomic dispatch exchange.
+            process=OpenProcess(PROCESS_QUERY_INFORMATION|PROCESS_VM_OPERATION,
+                FALSE,GetCurrentProcessId());
+            if(process) {
+                writable=VirtualProtectEx(process,slots[i],sizeof(void*),PAGE_EXECUTE_READWRITE,&protection)!=FALSE;
+                if(!writable)writable=VirtualProtectEx(process,slots[i],sizeof(void*),PAGE_EXECUTE_WRITECOPY,&protection)!=FALSE;
+            }
+            const auto fallbackError=writable?ERROR_SUCCESS:GetLastError();
+            char detail[192]{};
+            sprintf_s(detail,"Parkour observer: slot RVA=%llX local protection error=%lu; process-handle fallback=%s error=%lu.",
+                static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(slots[i])-base),localError,
+                writable?"ready":"failed",fallbackError);
+            Log(detail);
+        }
+        if(!writable){if(process)CloseHandle(process);continue;}
+        const bool swapped=InterlockedCompareExchangePointer(slots[i],reinterpret_cast<void*>(&ObservePose),
+            reinterpret_cast<void*>(originalSamplePose))==reinterpret_cast<void*>(originalSamplePose);
+        const bool restored=process?
+            VirtualProtectEx(process,slots[i],sizeof(void*),protection,&ignored)!=FALSE:
+            VirtualProtect(slots[i],sizeof(void*),protection,&ignored)!=FALSE;
+        if(process)CloseHandle(process);
+        if(swapped)++installed;
+        else Log("Parkour observer: dispatch slot changed before atomic exchange.");
+        if(!restored)Log("Parkour observer: dispatch page protection could not be restored.");
+    }
+    char message[160]{};
+    sprintf_s(message,"Parkour observer: %zu/%zu pose dispatch slots installed; %zu candidate clips. Full gameplay validation pending.",installed,count,std::size(fp::ParkourClips));
+    Log(message);
+    return installed==count;
+}
+std::uint64_t ActiveParkourClip(std::uintptr_t entity,unsigned generation) {
+    AcquireSRWLockShared(&playbackLock);
+    const auto clip=parkourPlayback.Active(entity,generation,GetTickCount64());
+    ReleaseSRWLockShared(&playbackLock);
+    return clip;
 }
 bool MenuOpen() {
     std::uintptr_t manager=0,stack=0;
@@ -136,14 +247,6 @@ void UpdateHotkey() {
 
 struct HiddenVisual { std::uintptr_t address=0,owner=0; std::uint64_t asset=0; std::uint16_t savedViewFlags=0; };
 HiddenVisual hiddenVisuals[32]{};
-bool KnownHeadAsset(std::uint64_t asset) {
-    // Independently verified asset IDs: face, eye/teeth, eyelash, hair, current hood.
-    constexpr std::uint64_t ids[]={211488955670ULL,87057018236ULL,79129654705ULL,
-        99877565340ULL,99877565356ULL,
-        0x2318E0DEA8ULL,119263477692ULL,147798842981ULL};
-    for(auto id:ids) if(id==asset) return true;
-    return false;
-}
 // Refresh only known renderer object implementations. No per-frame code patch.
 bool SetViewFlags(std::uintptr_t visual,std::uint16_t viewFlags) {
     using Refresh=void(__fastcall*)(void*);
@@ -181,8 +284,18 @@ void UpdateHeadVisibility() {
         std::uint16_t flags=0;
         if(!Read(components+8*i,visual) || !visual || !Read(visual,vt) ||
            vt!=base+gameBuild->visual || !Read(visual+0x10,owner) || owner!=entity ||
-           !Read(visual+0x38,shared) || !shared || !Read(shared+0x10,asset) ||
-           !KnownHeadAsset(asset) || !Read(visual+0x54,flags)) continue;
+           !Read(visual+0x38,shared) || !shared || !Read(shared+0x10,asset) || !Read(visual+0x54,flags)) continue;
+        static std::uint64_t reportedAssets[128]{};
+        static unsigned reportedAssetCount=0;
+        bool reportedAsset=false;
+        for(unsigned k=0;k<reportedAssetCount;++k)if(reportedAssets[k]==asset){reportedAsset=true;break;}
+        if(!reportedAsset&&reportedAssetCount<std::size(reportedAssets)) {
+            reportedAssets[reportedAssetCount++]=asset;
+            char message[160]{};
+            sprintf_s(message,"Player visual: asset=%llu head=%u flags=%04X",static_cast<unsigned long long>(asset),fp::KnownHeadAsset(asset)?1u:0u,static_cast<unsigned>(flags));
+            Log(message);
+        }
+        if(!fp::KnownHeadAsset(asset))continue;
         int record=-1;
         for(int k=0;k<32;++k) {
             if(hiddenVisuals[k].address==visual && hiddenVisuals[k].owner==entity &&
@@ -303,7 +416,8 @@ std::uintptr_t NavigationState(std::uintptr_t entity) {
 }
 
 bool ApplyEye(void* self,float* position,float* rotation,float* fov,const fp::Quat& cleanRotation) {
-    if (!position || !rotation || !fov || self!=LocalCamera() || MenuOpen()) return false;
+    parkourActiveClip.store(0);
+    if (!position || !rotation || !fov || self!=LocalCamera() || MenuOpen()) {sampledPlayer.store(0);return false;}
     std::uintptr_t entity=0;
     fp::Vec3 root{},old{},bodyForward{};
     fp::Quat q=cleanRotation;
@@ -316,6 +430,10 @@ bool ApplyEye(void* self,float* position,float* rotation,float* fov,const fp::Qu
     bool groundRoll=false,leap=false;
     const auto combatState=fp::ReadCombat(read,base,entity,&groundRoll,&leap,*gameBuild);
     const bool followLeap=followLeapOfFaith&&leap;
+    sampledPlayer.store(entity);
+    const auto parkourClip=followParkourSpins&&parkourObserverReady.load()?ActiveParkourClip(entity,cameraEpoch.load()):0;
+    const bool followParkour=parkourClip!=0&&!followLeap;
+    parkourActiveClip.store(followParkour?parkourClip:0);
     // Native cinematic pullback is expected during a verified leap.
     if(fp::DistanceSquared(old,root)>144.0f&&!followLeap)return false;
     struct State {
@@ -327,6 +445,7 @@ bool ApplyEye(void* self,float* position,float* rotation,float* fov,const fp::Qu
         fp::CameraFallback fallback;
         fp::CombatBlend combat;
         fp::BodyMotion motion;
+        fp::ParkourView parkourView;
         ULONGLONG diagnosticTime=0;
         float obstruction=-1;
         float peakPullback=0,peakHeadLag=0,peakYawStep=0;
@@ -348,7 +467,7 @@ bool ApplyEye(void* self,float* position,float* rotation,float* fov,const fp::Qu
     fp::Vec3 head{};
     const bool hasHead=trackHead&&fp::ReadHead(read,base,entity,head,*gameBuild);
     const fp::Vec3 anchor=state.filter.Step(root,head,hasHead,dt,headHalfLife,eyeHeight-headEyeHeight,
-        fp::FollowRoll(followCombatMotion,groundRoll,hasHead)||(followLeap&&hasHead));
+        fp::FollowRoll(followCombatMotion,groundRoll,hasHead)||((followLeap||followParkour)&&hasHead));
     const bool headAvailable=trackHead&&state.filter.Available();
     fp::Vec3 eye{};
     combatStatus.store(static_cast<int>(combatState));
@@ -356,12 +475,13 @@ bool ApplyEye(void* self,float* position,float* rotation,float* fov,const fp::Qu
     const float framedHeight=fp::CombatLerp(headEyeHeight,combatEyeHeight,combatAmount);
     const float framedForward=fp::CombatLerp(headForward,combatForward,combatAmount);
     if(!fp::LevelEyePosition(anchor,q,framedHeight,framedForward,eye))return false;
-    // Combat membership is not a roll detector. Never track ordinary attack
+    // Combat membership is not a roll/spin detector. Never track ordinary attack
     // bends or reuse combat's 0.45-second hold for orientation.
-    const float motionAmount=(fp::FollowRoll(followCombatMotion,groundRoll,hasHead)||(followLeap&&hasHead))?1.0f:0.0f;
+    const float motionAmount=(fp::FollowRoll(followCombatMotion,groundRoll,hasHead)||((followLeap||followParkour)&&hasHead))?1.0f:0.0f;
     fp::Quat torso{};
     const bool hasTorso=hasHead&&motionAmount>0.001f&&fp::ReadTorso(read,base,entity,torso,*gameBuild);
-    const auto bodyRotation=state.motion.Step(torso,hasTorso,state.look.previousBody,motionAmount,dt,followLeap?&q:nullptr);
+    const auto motionPose=state.parkourView.Step(torso,q,hasTorso&&followParkour);
+    const auto bodyRotation=state.motion.Step(followParkour?motionPose:torso,hasTorso,state.look.previousBody,motionAmount,dt,(followLeap||followParkour)?&q:nullptr);
     // Keep the filtered anchor, including during roll recovery. Raw torso/head
     // displacement must not drag the camera through an attack animation.
     eye=fp::Add(anchor,fp::Rotate(bodyRotation,fp::Sub(eye,anchor)));
@@ -444,7 +564,7 @@ void __fastcall CameraFx(void* self,float* position,float* rotation,float* fov) 
     fp::Quat clean{};
     const bool haveClean=Read(reinterpret_cast<std::uintptr_t>(rotation),clean);
     originalFx(self,position,rotation,fov);
-    if (!haveClean || !enabled.load() || faulted.load() || !GameFocused()) return;
+    if (!haveClean || !enabled.load() || faulted.load() || !GameFocused()) {parkourActiveClip.store(0);sampledPlayer.store(0);return;}
     AcquireSRWLockShared(&settingsLock);
     const bool applied=ApplyEye(self,position,rotation,fov,clean);
     ReleaseSRWLockShared(&settingsLock);
@@ -493,7 +613,7 @@ void Menu(loader::Gui& gui) {
         draft.forward=headForward;draft.smoothing=headHalfLife;draft.padding=collisionPadding;
         draft.radius=collisionRadius;draft.hideHead=hideHead;draft.collision=collisionEnabled;
         draft.automatic=autoThirdPerson;
-        draft.followLeap=followLeapOfFaith;draft.followMotion=followCombatMotion;draft.combat=combatFraming;draft.combatHeight=combatEyeHeight;
+        draft.followParkour=followParkourSpins;draft.followLeap=followLeapOfFaith;draft.followMotion=followCombatMotion;draft.combat=combatFraming;draft.combatHeight=combatEyeHeight;
         draft.combatForward=combatForward;draft.combatFov=combatFov;initialized=true;
     }
     ImGui::PushID("ACUnityFirstPerson");
@@ -533,6 +653,9 @@ void Menu(loader::Gui& gui) {
     ImGui::SliderFloat("Eye height adjustment",&draft.eyeHeight,-0.2f,0.4f,"%.2f m",ImGuiSliderFlags_AlwaysClamp);
     ImGui::SliderFloat("Eye forward adjustment",&draft.forward,-0.1f,0.3f,"%.2f m",ImGuiSliderFlags_AlwaysClamp);
     ImGui::SliderFloat("Head smoothing",&draft.smoothing,0.01f,0.3f,"%.3f seconds",ImGuiSliderFlags_AlwaysClamp);
+    ImGui::Checkbox("Follow parkour spins",&draft.followParkour);
+    if(draft.followParkour)
+        ImGui::TextWrapped("For the smoothest parkour, let go of the mouse during moves and let Arno take over. Mouse control stays available whenever you need it.");
     ImGui::Checkbox("Follow Leap of Faith",&draft.followLeap);
     ImGui::Checkbox("Follow recognized rolls",&draft.followMotion);
     ImGui::TextWrapped("Rotate the camera with recognized ground and combat rolls. Ordinary attacks and parries keep your normal aim.");
@@ -542,8 +665,6 @@ void Menu(loader::Gui& gui) {
         ImGui::SliderFloat("Combat eye height",&draft.combatHeight,-0.2f,0.2f,"%.2f m",ImGuiSliderFlags_AlwaysClamp);
         ImGui::SliderFloat("Combat forward adjustment",&draft.combatForward,-0.1f,0.3f,"%.2f m",ImGuiSliderFlags_AlwaysClamp);
         ImGui::SliderFloat("Combat vertical field of view",&draft.combatFov,40,100,"%.0f degrees",ImGuiSliderFlags_AlwaysClamp);
-        const auto detected=static_cast<fp::CombatState>(combatStatus.load());
-        ImGui::Text("Last sampled combat state: %s",detected==fp::CombatState::Active?"Active":detected==fp::CombatState::Clear?"Clear":"Unavailable");
         ImGui::TreePop();
     }
     ImGui::Checkbox("Hide head in main view (experimental shadows)",&draft.hideHead);
@@ -564,7 +685,7 @@ void Menu(loader::Gui& gui) {
             headForward=draft.forward;headHalfLife=draft.smoothing;collisionPadding=draft.padding;
             collisionRadius=draft.radius;hideHead=draft.hideHead;collisionEnabled=draft.collision;
             autoThirdPerson=draft.automatic;
-            followLeapOfFaith=draft.followLeap;followCombatMotion=draft.followMotion;combatFraming=draft.combat;combatEyeHeight=draft.combatHeight;
+            followParkourSpins=draft.followParkour;followLeapOfFaith=draft.followLeap;followCombatMotion=draft.followMotion;combatFraming=draft.combat;combatEyeHeight=draft.combatHeight;
             combatForward=draft.combatForward;combatFov=draft.combatFov;cameraEpoch.fetch_add(1);
             ReleaseSRWLockExclusive(&settingsLock);
             lastKeyDown=(GetAsyncKeyState(toggleKey)&0x8000)!=0;
@@ -589,6 +710,38 @@ void Frame(loader::Gui& gui) {
     if(collisionReady.load()&&!reportedCollisionReady){reportedCollisionReady=true;Log("Native collision rays completed successfully.");}
     static bool reportedCollisionFault=false;
     if(collisionFault.load()&&!reportedCollisionFault){reportedCollisionFault=true;Log("Collision query failed: retaining engine camera for this session.");}
+    // Log outside the sampling lock and cap work per GUI frame.
+    for(unsigned i=0;i<16;++i) {
+        fp::ParkourCapture::Entry entry{};
+        AcquireSRWLockExclusive(&playbackLock);
+        const bool captured=parkourCapture.Pop(entry);
+        ReleaseSRWLockExclusive(&playbackLock);
+        if(!captured)break;
+        const auto* known=fp::FindParkourClip(entry.handle);
+        char message[192]{};
+        sprintf_s(message,"Parkour sampled: clip=%llu token=%u family=%s",static_cast<unsigned long long>(entry.handle),entry.token,known?known->family:"unmapped");
+        Log(message);
+    }
+    static ULONGLONG nextParkourDiagnostic=0;
+    static unsigned diagnosticReports=0;
+    const auto diagnosticTime=GetTickCount64();
+    if(parkourObserverReady.load()&&diagnosticReports<360&&diagnosticTime>=nextParkourDiagnostic) {
+        nextParkourDiagnostic=diagnosticTime+5000;++diagnosticReports;
+        AcquireSRWLockShared(&playbackLock);
+        const auto d=parkourPlayback;
+        ReleaseSRWLockShared(&playbackLock);
+        char message[256]{};
+        sprintf_s(message,"Parkour counters: samples=%llu matches=%llu late=%llu last=%llu token=%u latest=%u matched=%u active=%llu",static_cast<unsigned long long>(d.samples),static_cast<unsigned long long>(d.matches),static_cast<unsigned long long>(d.lateSamples),static_cast<unsigned long long>(d.lastHandle),d.lastToken,d.latestFrame,d.matchedFrame,static_cast<unsigned long long>(parkourActiveClip.load()));
+        Log(message);
+    }
+    static std::uint64_t reportedParkour=0;
+    static unsigned parkourReports=0;
+    const auto clip=parkourActiveClip.load();
+    if(clip!=reportedParkour&&parkourReports<256) {
+        reportedParkour=clip;++parkourReports;
+        const auto* entry=fp::FindParkourClip(clip);
+        char message[160]{};sprintf_s(message,"Parkour playback: clip=%llu family=%s",static_cast<unsigned long long>(clip),entry?entry->family:"none");Log(message);
+    }
     static int reported=0;
     const int mode=anchorMode.load();
     if(mode && mode!=reported) {
@@ -609,6 +762,7 @@ bool Ready(loader::Interface&) {
     forwardOffset=Setting(L"ForwardOffset",0.25f,-0.5f,0.75f);
     fovDegrees=Setting(L"VerticalFOV",70.0f,0.0f,100.0f);
     if (fovDegrees>0 && fovDegrees<40) fovDegrees=70.0f;
+    followParkourSpins=GetPrivateProfileIntW(L"Camera",L"FollowParkourSpins",1,iniPath)!=0;
     followLeapOfFaith=GetPrivateProfileIntW(L"Camera",L"FollowLeapOfFaith",1,iniPath)!=0;
     followCombatMotion=GetPrivateProfileIntW(L"Camera",L"FollowCombatMotion",1,iniPath)!=0;
     combatFraming=GetPrivateProfileIntW(L"Camera",L"CombatFraming",1,iniPath)!=0;
@@ -627,6 +781,8 @@ bool Ready(loader::Interface&) {
     collisionEnabled=GetPrivateProfileIntW(L"Camera",L"CollisionGuard",1,iniPath)!=0;
     collisionPadding=Setting(L"CollisionPadding",0.12f,0.05f,0.3f);
     collisionRadius=Setting(L"CollisionRadius",0.16f,0.03f,0.25f);
+    parkourObserverReady.store(InstallParkourObserver());
+    if(!parkourObserverReady.load())Log("Parkour observer unavailable: normal camera and existing roll/leap tracking retained.");
     Log("Prototype 0.8.6 ready: configurable key and camera settings in plugin menu. Starts OFF.");
     return true;
 }

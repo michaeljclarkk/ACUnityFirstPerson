@@ -2,7 +2,26 @@
 
 Reverse-chronological development notes. Newest first.
 
-## 0.8.6 — AC Unity 1.5.1 compatibility candidate
+## 0.8.7 Parkour camera and AC Unity 1.5.1 support
+
+- Added Follow parkour spins, with 493 recognized animation clips covering turns,
+  swings, and descent transitions. The camera follows Arno's torso rotation while
+  preserving the initial viewing offset and accounting for native camera turns.
+- Added verified parkour observer support for AC Unity 1.5.1 while retaining
+  1.5.0 support. Fixed a 1.5.1 memory-protection failure that prevented the
+  observer from installing and left animation samples at zero. 
+- Added guidance to let go of the mouse during parkour moves for the smoothest
+  camera motion. Mouse control remains available throughout every animation.
+- Removed parkour diagnostics, observer status, and sampled combat state from
+  the settings menu.
+- Expanded head hiding to 31 recognized head and hair resources, including
+  eye/teeth and eyelash variants, while retaining the existing visibility flags.
+- Added configurable left/right look limits and camera following for recognized
+  combat rolls.
+- All 10 test suites pass, including observer installation for both game versions
+  and the fallback used when local memory-protection changes are denied.
+
+  ## 0.8.6 — AC Unity 1.5.1 compatibility candidate
 
 Add head left / right yaw limit. Configured in the GUI as its own option. 180* allows full rotation. 
 This Version also workds on the camera following the rolls during combat. 

@@ -53,6 +53,8 @@ The installer and uninstaller take a mandatory `-GamePath`, e.g.
 
 ## Releasing
 
+Only Do when explicitly asked. The worst thing that you can do is update the changlelogs / release without explicit confirmation from the user. 
+
 Push a `v<version>` tag and `.github/workflows/release.yml` builds, tests, packages and
 publishes the GitHub release. It refuses to run if the tag disagrees with the version in
 `CMakeLists.txt`, so bump all three version strings and commit before tagging.
