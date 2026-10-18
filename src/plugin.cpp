@@ -107,10 +107,11 @@ std::uintptr_t __fastcall ObservePose(std::uintptr_t node,std::uintptr_t pose,st
     return result;
 }
 bool InstallParkourObserver() {
-    // This detector is mapped only for 1.5.0. Other camera features keep working.
-    if(gameBuild!=&fp::Build150)return false;
+    // Version-specific entry points, verified against captured code and live dispatch tables.
+    if(!gameBuild||!gameBuild->parkourPose)return false;
+    const auto poseRva=gameBuild->parkourPose;
     constexpr unsigned char signature[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x48,0x89,0x7C,0x24,0x20,0x41,0x56,0x48,0x83,0xEC,0x30,0x0F,0xB7,0x49,0x64,0x4D,0x8B,0x48,0x20,0x49,0x8B,0xD8,0x49,0x8B,0x81,0x60,0x02,0x00,0x00,0x45,0x8B,0x40,0x44,0xC1,0xE1,0x03,0x48,0x8B,0x34,0x01,0x48,0x8B,0xFA,0x0F,0xB6,0x53,0x12,0x48,0x8B};
-    for(size_t i=0;i<sizeof(signature);++i){unsigned char b=0;if(!Read(base+0xBCC20+i,b)||b!=signature[i])return false;}
+    for(size_t i=0;i<sizeof(signature);++i){unsigned char b=0;if(!Read(base+poseRva+i,b)||b!=signature[i])return false;}
     IMAGE_DOS_HEADER dos{};IMAGE_NT_HEADERS64 nt{};
     if(!Read(base,dos)||!Read(base+static_cast<unsigned>(dos.e_lfanew),nt)||nt.FileHeader.NumberOfSections>96)return false;
     const auto sections=base+static_cast<unsigned>(dos.e_lfanew)+24+nt.FileHeader.SizeOfOptionalHeader;
@@ -125,7 +126,7 @@ bool InstallParkourObserver() {
             textStart=base+rva;textEnd=textStart+size;
         }
     }
-    if(base+0xBCC20<textStart||base+0xBCC20+sizeof(signature)>textEnd)return false;
+    if(base+poseRva<textStart||base+poseRva+sizeof(signature)>textEnd)return false;
     void** slots[32]{};size_t count=0;
     // Only aligned references in .rdata surrounded by game-code function pointers.
     // Swapping an aligned dispatch pointer avoids rewriting executing instructions.
@@ -139,22 +140,45 @@ bool InstallParkourObserver() {
         for(std::uintptr_t offset=8;offset+16<=size;offset+=8) {
             std::uintptr_t value=0,before=0,after=0;
             if(!Read(base+start+offset,value))return false;
-            if(value!=base+0xBCC20)continue;
+            if(value!=base+poseRva)continue;
             if(!Read(base+start+offset-8,before)||!Read(base+start+offset+8,after)||
                before<textStart||before>=textEnd||after<textStart||after>=textEnd||count==32)return false;
             slots[count++]=reinterpret_cast<void**>(base+start+offset);
         }
     }
     if(!count)return false;
-    originalSamplePose=reinterpret_cast<SamplePose>(base+0xBCC20);
+    originalSamplePose=reinterpret_cast<SamplePose>(base+poseRva);
     size_t installed=0;
     for(size_t i=0;i<count;++i) {
         DWORD protection=0,ignored=0;
-        if(!VirtualProtect(slots[i],sizeof(void*),PAGE_READWRITE,&protection))continue;
+        HANDLE process=nullptr;
+        bool writable=VirtualProtect(slots[i],sizeof(void*),PAGE_READWRITE,&protection)!=FALSE;
+        if(!writable) {
+            const auto localError=GetLastError();
+            // 1.5.1 can reject local protection changes. Match ACUFixes151's
+            // real-process-handle path, but retain the atomic dispatch exchange.
+            process=OpenProcess(PROCESS_QUERY_INFORMATION|PROCESS_VM_OPERATION,
+                FALSE,GetCurrentProcessId());
+            if(process) {
+                writable=VirtualProtectEx(process,slots[i],sizeof(void*),PAGE_EXECUTE_READWRITE,&protection)!=FALSE;
+                if(!writable)writable=VirtualProtectEx(process,slots[i],sizeof(void*),PAGE_EXECUTE_WRITECOPY,&protection)!=FALSE;
+            }
+            const auto fallbackError=writable?ERROR_SUCCESS:GetLastError();
+            char detail[192]{};
+            sprintf_s(detail,"Parkour observer: slot RVA=%llX local protection error=%lu; process-handle fallback=%s error=%lu.",
+                static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(slots[i])-base),localError,
+                writable?"ready":"failed",fallbackError);
+            Log(detail);
+        }
+        if(!writable){if(process)CloseHandle(process);continue;}
         const bool swapped=InterlockedCompareExchangePointer(slots[i],reinterpret_cast<void*>(&ObservePose),
             reinterpret_cast<void*>(originalSamplePose))==reinterpret_cast<void*>(originalSamplePose);
-        const bool restored=VirtualProtect(slots[i],sizeof(void*),protection,&ignored)!=FALSE;
+        const bool restored=process?
+            VirtualProtectEx(process,slots[i],sizeof(void*),protection,&ignored)!=FALSE:
+            VirtualProtect(slots[i],sizeof(void*),protection,&ignored)!=FALSE;
+        if(process)CloseHandle(process);
         if(swapped)++installed;
+        else Log("Parkour observer: dispatch slot changed before atomic exchange.");
         if(!restored)Log("Parkour observer: dispatch page protection could not be restored.");
     }
     char message[160]{};
@@ -629,19 +653,9 @@ void Menu(loader::Gui& gui) {
     ImGui::SliderFloat("Eye height adjustment",&draft.eyeHeight,-0.2f,0.4f,"%.2f m",ImGuiSliderFlags_AlwaysClamp);
     ImGui::SliderFloat("Eye forward adjustment",&draft.forward,-0.1f,0.3f,"%.2f m",ImGuiSliderFlags_AlwaysClamp);
     ImGui::SliderFloat("Head smoothing",&draft.smoothing,0.01f,0.3f,"%.3f seconds",ImGuiSliderFlags_AlwaysClamp);
-    ImGui::Checkbox("Follow parkour spins (experimental, 1.5.0)",&draft.followParkour);
-    ImGui::TextWrapped("Follows catalogued parkour turns and swings while their animation is sampled. Gameplay validation is pending.");
-    ImGui::Text("Parkour observer: %s",parkourObserverReady.load()?"Ready":"Unavailable (normal camera retained)");
-    if(ImGui::TreeNode("Parkour diagnostics")) {
-        AcquireSRWLockShared(&playbackLock);
-        const auto diagnostics=parkourPlayback;
-        ReleaseSRWLockShared(&playbackLock);
-        ImGui::Text("Player pose samples: %llu",static_cast<unsigned long long>(diagnostics.samples));
-        ImGui::Text("Catalogue matches: %llu; late samples: %llu",static_cast<unsigned long long>(diagnostics.matches),static_cast<unsigned long long>(diagnostics.lateSamples));
-        ImGui::Text("Last sampled clip: %llu; token: %u",static_cast<unsigned long long>(diagnostics.lastHandle),diagnostics.lastToken);
-        ImGui::Text("Active parkour clip: %llu",static_cast<unsigned long long>(parkourActiveClip.load()));
-        ImGui::TreePop();
-    }
+    ImGui::Checkbox("Follow parkour spins",&draft.followParkour);
+    if(draft.followParkour)
+        ImGui::TextWrapped("For the smoothest parkour, let go of the mouse during moves and let Arno take over. Mouse control stays available whenever you need it.");
     ImGui::Checkbox("Follow Leap of Faith",&draft.followLeap);
     ImGui::Checkbox("Follow recognized rolls",&draft.followMotion);
     ImGui::TextWrapped("Rotate the camera with recognized ground and combat rolls. Ordinary attacks and parries keep your normal aim.");
@@ -651,8 +665,6 @@ void Menu(loader::Gui& gui) {
         ImGui::SliderFloat("Combat eye height",&draft.combatHeight,-0.2f,0.2f,"%.2f m",ImGuiSliderFlags_AlwaysClamp);
         ImGui::SliderFloat("Combat forward adjustment",&draft.combatForward,-0.1f,0.3f,"%.2f m",ImGuiSliderFlags_AlwaysClamp);
         ImGui::SliderFloat("Combat vertical field of view",&draft.combatFov,40,100,"%.0f degrees",ImGuiSliderFlags_AlwaysClamp);
-        const auto detected=static_cast<fp::CombatState>(combatStatus.load());
-        ImGui::Text("Last sampled combat state: %s",detected==fp::CombatState::Active?"Active":detected==fp::CombatState::Clear?"Clear":"Unavailable");
         ImGui::TreePop();
     }
     ImGui::Checkbox("Hide head in main view (experimental shadows)",&draft.hideHead);

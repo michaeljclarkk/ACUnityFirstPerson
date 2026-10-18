@@ -7,7 +7,8 @@ struct PoseClipSample {
  std::uint64_t handle=0;
  std::uint32_t frame=0;
 };
-// 1.5.0 pose sampling callback RVA BCC20. The context's graph at +18 owns
+// Pose sampling callback: 1.5.0 RVA BCC20, 1.5.1 RVA BC640.
+// Both versions retain this layout. The context's graph at +18 owns
 // animCpnt (+6A0); its evaluation at +20 holds providers (+260, count +26A).
 // Node +64 selects a provider; provider +28 is the actual shared animation
 // block (handle +10), including dynamically selected/replaced animations.
