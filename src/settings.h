@@ -9,6 +9,7 @@ struct Settings {
  float fov=70,eyeHeight=0.12f,forward=0.16f,smoothing=0.07f,padding=0.12f,radius=0.16f;
  bool hideHead=true,collision=true,automatic=false;
  bool combat=true,followMotion=true,followLeap=true,followParkour=true;
+ bool gait=true;
  float combatHeight=-0.06f,combatForward=0.02f,combatFov=80.0f;
 };
 inline bool BindableKey(int k) {
@@ -55,6 +56,7 @@ inline bool SaveSettings(const wchar_t* path,const Settings& s) {
  flag(L"CombatFraming",s.combat);
  write(L"CombatEyeHeight",s.combatHeight);write(L"CombatForward",s.combatForward);write(L"CombatVerticalFOV",s.combatFov);
  flag(L"HideHead",s.hideHead);flag(L"CollisionGuard",s.collision);flag(L"AutoThirdPerson",s.automatic);
+ flag(L"CameraGait",s.gait);
  WritePrivateProfileStringW(nullptr,nullptr,nullptr,temporary.c_str());
  if(ok)ok=MoveFileExW(temporary.c_str(),path,MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)!=FALSE;
  if(!ok)DeleteFileW(temporary.c_str());

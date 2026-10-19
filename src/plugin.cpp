@@ -5,6 +5,7 @@
 #include "settings.h"
 #include "combat_camera.h"
 #include "body_motion.h"
+#include "camera_gait.h"
 #include "parkour_tracking.h"
 #include "head_visibility.h"
 #include "imgui.h"
@@ -33,6 +34,7 @@ ULONGLONG menuSeen=0;
 SRWLOCK settingsLock=SRWLOCK_INIT;
 bool trackHead=true,hideHead=true;
 bool combatFraming=true,followCombatMotion=true,followLeapOfFaith=true,followParkourSpins=true;
+bool gaitCamera=true;
 float combatEyeHeight=-0.06f,combatForward=0.02f,combatFov=80.0f;
 std::atomic<int> combatStatus{0};
 using SamplePose=std::uintptr_t(__fastcall*)(std::uintptr_t,std::uintptr_t,std::uintptr_t);
@@ -446,6 +448,7 @@ bool ApplyEye(void* self,float* position,float* rotation,float* fov,const fp::Qu
         fp::CombatBlend combat;
         fp::BodyMotion motion;
         fp::ParkourView parkourView;
+        fp::GaitRig gait;
         ULONGLONG diagnosticTime=0;
         float obstruction=-1;
         float peakPullback=0,peakHeadLag=0,peakYawStep=0;
@@ -486,6 +489,14 @@ bool ApplyEye(void* self,float* position,float* rotation,float* fov,const fp::Qu
     // displacement must not drag the camera through an attack animation.
     eye=fp::Add(anchor,fp::Rotate(bodyRotation,fp::Sub(eye,anchor)));
     q=fp::Multiply(bodyRotation,q);
+    // Step bob and look sway over the settled eye, damped while a weapon is
+    // drawn the way aiming steadies a camera.
+    const auto gait=state.gait.Step(root,state.look.previousYaw,dt,gaitCamera,
+        1.0f-0.6f*std::clamp(combatAmount,0.0f,1.0f));
+    if(gait.right!=0.0f||gait.up!=0.0f) {
+        eye=fp::Add(eye,fp::Scale(fp::Rotate(q,{1,0,0}),gait.right));
+        eye=fp::Add(eye,fp::Scale(fp::Rotate(q,{0,0,1}),gait.up));
+    }
     anchorMode.store(hasHead?2:3);
     const fp::Vec3 requestedEye=eye;
     if(collisionEnabled&&!collisionFault.load()) {
@@ -535,15 +546,17 @@ bool ApplyEye(void* self,float* position,float* rotation,float* fov,const fp::Qu
     }
     if(now-state.diagnosticTime>=1000) {
         state.diagnosticTime=now;
-        char message[384]{};
-        sprintf_s(message,"Look: navRva=%llX rawYaw=%.1f bodyYaw=%.1f relative=%.1f pitch=%.1f limit=%d peakYawStep=%.1f peakPullback=%.3f peakHeadLag=%.3f combat=%d combatBlend=%.2f motion=%.2f torso=%d groundRoll=%d leap=%d",
+        char message[512]{};
+        sprintf_s(message,"Look: navRva=%llX rawYaw=%.1f bodyYaw=%.1f relative=%.1f pitch=%.1f limit=%d peakYawStep=%.1f peakPullback=%.3f peakHeadLag=%.3f lag=%.3f jumps=%u combat=%d combatBlend=%.2f motion=%.2f torso=%d groundRoll=%d leap=%d",
             static_cast<unsigned long long>(NavigationState(entity)),
             state.look.previousYaw*180/fp::Pi,state.look.previousBody*180/fp::Pi,
             state.look.relative*180/fp::Pi,state.look.pitch*180/fp::Pi,state.look.atLimit?1:0,
             state.peakYawStep*180/fp::Pi,state.peakPullback,state.peakHeadLag,
+            state.filter.lastLag,state.filter.jumps,
             static_cast<int>(combatState),combatAmount,motionAmount,hasTorso?1:0,groundRoll?1:0,leap?1:0);
         Log(message);
         state.peakYawStep=state.peakPullback=state.peakHeadLag=0;
+        state.filter.jumps=0;
     }
     if(useNative){lastApplied.store(0);return false;}
     __try {
@@ -614,10 +627,10 @@ void Menu(loader::Gui& gui) {
         draft.radius=collisionRadius;draft.hideHead=hideHead;draft.collision=collisionEnabled;
         draft.automatic=autoThirdPerson;
         draft.followParkour=followParkourSpins;draft.followLeap=followLeapOfFaith;draft.followMotion=followCombatMotion;draft.combat=combatFraming;draft.combatHeight=combatEyeHeight;
-        draft.combatForward=combatForward;draft.combatFov=combatFov;initialized=true;
+        draft.combatForward=combatForward;draft.combatFov=combatFov;draft.gait=gaitCamera;initialized=true;
     }
     ImGui::PushID("ACUnityFirstPerson");
-    ImGui::TextUnformatted("First Person 0.8.7");
+    ImGui::TextUnformatted("First Person 0.8.8");
     bool on=enabled.load();
     ImGui::BeginDisabled(faulted.load());
     if(ImGui::Checkbox("First person enabled",&on)) {
@@ -653,6 +666,8 @@ void Menu(loader::Gui& gui) {
     ImGui::SliderFloat("Eye height adjustment",&draft.eyeHeight,-0.2f,0.4f,"%.2f m",ImGuiSliderFlags_AlwaysClamp);
     ImGui::SliderFloat("Eye forward adjustment",&draft.forward,-0.1f,0.3f,"%.2f m",ImGuiSliderFlags_AlwaysClamp);
     ImGui::SliderFloat("Head smoothing",&draft.smoothing,0.01f,0.3f,"%.3f seconds",ImGuiSliderFlags_AlwaysClamp);
+    ImGui::Checkbox("Step bob and sway",&draft.gait);
+    ImGui::TextWrapped("Adds a small spring-damped offset that follows travel and turning. It fades while a weapon is drawn.");
     ImGui::Checkbox("Follow parkour spins",&draft.followParkour);
     if(draft.followParkour)
         ImGui::TextWrapped("For the smoothest parkour, let go of the mouse during moves and let Arno take over. Mouse control stays available whenever you need it.");
@@ -686,7 +701,7 @@ void Menu(loader::Gui& gui) {
             collisionRadius=draft.radius;hideHead=draft.hideHead;collisionEnabled=draft.collision;
             autoThirdPerson=draft.automatic;
             followParkourSpins=draft.followParkour;followLeapOfFaith=draft.followLeap;followCombatMotion=draft.followMotion;combatFraming=draft.combat;combatEyeHeight=draft.combatHeight;
-            combatForward=draft.combatForward;combatFov=draft.combatFov;cameraEpoch.fetch_add(1);
+            combatForward=draft.combatForward;combatFov=draft.combatFov;gaitCamera=draft.gait;cameraEpoch.fetch_add(1);
             ReleaseSRWLockExclusive(&settingsLock);
             lastKeyDown=(GetAsyncKeyState(toggleKey)&0x8000)!=0;
             strcpy_s(status,"Saved and applied. No restart needed.");Log("Menu settings saved and applied.");
@@ -781,9 +796,10 @@ bool Ready(loader::Interface&) {
     collisionEnabled=GetPrivateProfileIntW(L"Camera",L"CollisionGuard",1,iniPath)!=0;
     collisionPadding=Setting(L"CollisionPadding",0.12f,0.05f,0.3f);
     collisionRadius=Setting(L"CollisionRadius",0.16f,0.03f,0.25f);
+    gaitCamera=GetPrivateProfileIntW(L"Camera",L"CameraGait",1,iniPath)!=0;
     parkourObserverReady.store(InstallParkourObserver());
     if(!parkourObserverReady.load())Log("Parkour observer unavailable: normal camera and existing roll/leap tracking retained.");
-    Log("Prototype 0.8.7 ready: configurable key and camera settings in plugin menu. Starts OFF.");
+    Log("Prototype 0.8.8 ready: configurable key and camera settings in plugin menu. Starts OFF.");
     return true;
 }
 }

@@ -2,6 +2,17 @@
 
 Reverse-chronological development notes. Newest first.
 
+## 0.8.8 Camera gait and head anchor bounds
+
+- Added Step bob and sway (`[Camera] CameraGait=1`, on by default): a
+  spring-damped offset driven by real travel and turning that fades while a
+  weapon is drawn. It never rolls the camera or changes native yaw and pitch.
+- Bounded how far the eye may trail the animated head to 8 cm. A discontinuous
+  pose change is adopted in one frame instead of being swept through, and the
+  correction never moves faster than the pose it follows.
+- Added camera_gait tests covering gait bounds, frame-rate independence,
+  settling, teleports and degenerate frames.
+
 ## 0.8.7 Parkour camera and AC Unity 1.5.1 support
 
 - Added Follow parkour spins, with 493 recognized animation clips covering turns,

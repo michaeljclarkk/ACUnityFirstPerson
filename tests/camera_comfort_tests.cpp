@@ -58,6 +58,70 @@ int main(){
   }
   Check(high-low<0.15f,"rapid alternating poses are attenuated");
  }
+ // A continuous fast pose change (a dive or a big dive-adjacent animation) must
+ // not leave the eye trailing behind the animated head by more than the neck
+ // allows, or the chest rotates through the camera.
+ for(const float rate:{30.0f,60.0f,144.0f}) {
+  fp::HeadFilter dive;
+  const fp::Vec3 root{};
+  dive.Step(root,{0,0,1.5f},true,0,0.07f,1.5f);
+  float peak=0;
+  const float dt=1/rate;
+  for(int i=0;i<static_cast<int>(rate*2);++i) {
+   // 6 m/s: faster than the 3 m/s smoothing limit, so lag would grow unbounded.
+   const float height=1.5f+6.0f*i*dt;
+   const auto current=dive.Step(root,{0,0,height},true,dt,0.07f,1.5f);
+   const float lag=height-(current.z-root.z);
+   if(i>2)peak=std::max(peak,lag);
+  }
+  Check(peak<=fp::HeadFilter::LagLimit+0.02f,"fast forward motion stays near the neck clearance");
+ }
+ // A reversal must not be chased: that is the vibration 0.8.1 exhibited.
+ {
+  fp::HeadFilter noisy;
+  const fp::Vec3 root{};
+  noisy.Step(root,{0,0,1.5f},true,0,0.07f,1.5f);
+  float previous=0,low=2,high=0;
+  for(int i=0;i<240;++i) {
+   const auto current=noisy.Step(root,{0,0,i%2?1.8f:1.2f},true,1/60.0f,0.07f,1.5f);
+   const float z=current.z-root.z;
+   if(i>0)Check(std::abs(z-previous)<=3/60.0f+0.0001f,"reversing poses stay on the smoothing path");
+   previous=z;low=std::min(low,z);high=std::max(high,z);
+  }
+  Check(high-low<0.15f,"reversing poses are attenuated, not chased");
+ }
+ // An animation state change moves the head far in one frame. The eye must adopt
+ // the new pose instead of swooping through the body to catch up.
+ {
+  fp::HeadFilter cut;
+  const fp::Vec3 root{};
+  cut.Step(root,{0,0,1.5f},true,1/60.0f,0.07f,1.5f);
+  cut.Step(root,{0,0,1.5f},true,1/60.0f,0.07f,1.5f);
+  cut.Step(root,{0,0,1.4f},true,1/60.0f,0.07f,1.5f);
+  Check(cut.jumps==0,"ordinary motion is not a pose jump");
+  const auto afterCut=cut.Step(root,{0,0,0.3f},true,1/60.0f,0.07f,1.5f);
+  Check(cut.jumps==1,"a discontinuous pose is adopted");
+  Check(Near(afterCut.z-root.z,0.3f),"the cut pose is taken in one frame");
+  Check(cut.lastLag<0.001f,"a cut leaves no lag to sweep through");
+ }
+ // A large lag must never be repaid faster than the pose itself is moving, or
+ // the catch-up reads as a flash.
+ {
+  fp::HeadFilter slow;
+  const fp::Vec3 root{};
+  slow.Step(root,{0,0,1.5f},true,1/60.0f,0.07f,1.5f);
+  slow.Step(root,{0,0,1.5f},true,1/60.0f,0.07f,1.5f);
+  // One smooth, slow frame after forcing a large trailing offset.
+  const auto first=slow.Step(root,{0,0,1.5f},true,1/60.0f,0.07f,1.5f);
+  float peakStep=0,previous=first.z-root.z;
+  for(int i=0;i<120;++i) {
+   const auto current=slow.Step(root,{0,0,1.5f+i*0.001f},true,1/60.0f,0.07f,1.5f);
+   const float z=current.z-root.z;
+   peakStep=std::max(peakStep,std::abs(z-previous));
+   previous=z;
+  }
+  Check(peakStep<0.04f,"recovery never exceeds the pose's own speed");
+ }
  fp::HeadFilter dropout;
  dropout.Step({0,0,0},{},false,0,0.07f,1.5f);
  Check(!dropout.Available(),"never invent tracking before first valid pose");
