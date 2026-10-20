@@ -79,6 +79,14 @@ int main(){
  for(int i=0;i<3;++i){m.put(map+8*i,ids[i]);m.put(map+8*i+4,std::uint16_t(i));m.put(poses+32*i,positions[i]);}
  Check(fp::ReadTorso(m,base,entity,neutral),"mapped torso read");
  Check(Near(fp::Rotate(neutral,{0,0,1}),{0,0,1}),"translation does not affect orientation");
+ fp::TorsoPoints sampled{};
+ Check(fp::ReadTorso(m,base,entity,neutral,fp::Build150,&sampled)&&Near(sampled.hips,{10,20,30})&&Near(sampled.left,{9.8f,20,30.6f}),"torso exposes world-space points");
+ m.put(cp,base+fp::Build151.skeleton);
+ Check(fp::ReadTorso(m,base,entity,neutral,fp::Build151,&sampled)&&Near(sampled.right,{10.2f,20,30.6f}),"1.5.1 torso points use build-specific skeleton");
+ m.put(cp,base+fp::Build150.skeleton);
+ auto replacing=[&](std::uintptr_t p,auto& value){if(p==cp+0x288){static int reads=0;if(++reads==2)m.put(cp+0x288,buffer+8);}return m(p,value);};
+ Check(!fp::ReadTorso(replacing,base,entity,neutral,fp::Build150,&sampled),"mid-read buffer replacement rejected");
+ m.put(cp+0x288,buffer);
  m.put(map+4,std::uint16_t(348));Check(!fp::ReadTorso(m,base,entity,neutral),"out of bounds bone rejected");
  m.put(map+4,std::uint16_t(0));m.put(info+0x42,std::uint16_t(2));Check(!fp::ReadTorso(m,base,entity,neutral),"missing shoulder rejected");
  std::puts("Torso reader, full rolls/spins, eye offsets, normal turns and recovery passed.");

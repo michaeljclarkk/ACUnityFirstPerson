@@ -62,6 +62,10 @@ The mod never touches Unity's own controls, so nothing you have bound in-game st
 Period was chosen because the game doesn't use it by default; if it clashes with something
 else you have installed, rebind the toggle in the menu.
 
+During tracked rolls, leaps and recognised parkour, a tapered torso capsule checks the final eye position against Arno's body, excluding the head area. It continues for 0.25 seconds after the manoeuvre. Small overlaps receive up to 8 cm of wall-checked correction while staying in first person. Third person is reserved for penetration deeper than 3 cm that remains unresolved for 0.12 seconds. Missing torso reads do not trigger fallback on their own; head-tracking loss retains its existing handling.
+
+Head hiding also covers verified separate player hood meshes across standard outfits, supported legacy outfits and Dead Kings, including raised/lowered forms and detail levels. It preserves their shadow visibility. Custom mods that reuse these resource IDs inherit the behaviour; new IDs need verification, and hoods merged into a body mesh cannot be selectively hidden by this mechanism.
+
 ## Configuration
 
 `ACUnityFirstPerson.ini`, section `[Camera]`:
@@ -79,7 +83,7 @@ else you have installed, rebind the toggle in the menu.
 | `CollisionGuard` | `1` | Probe for geometry and pull the camera back instead of clipping. |
 | `CollisionPadding` | `0.12` | Clearance kept in front of the eye, in metres. |
 | `CollisionRadius` | `0.16` | Probe radius, in metres. |
-| `AutoThirdPerson` | `0` | `0` stays first person through turns and local corrections. `1` restores the older automatic fallback thresholds. |
+| `AutoThirdPerson` | `0` | `0` stays first person through turns and local corrections. `1` enables rearward-look and large wall-correction fallback. Sustained unresolved torso penetration during tracked manoeuvres and lost head tracking can trigger third person in either mode. |
 | `CombatFraming` | `1` | Lower, tighter framing while in combat. |
 | `CombatEyeHeight` | `-0.06` | Combat eye height relative to the tracked head. |
 | `CombatForward` | `0.02` | Combat forward offset. |

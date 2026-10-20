@@ -34,8 +34,9 @@ inline bool TorsoRotation(Vec3 hips,Vec3 left,Vec3 right,Quat& q){
  else {const float s=std::sqrt(1+z.z-x.x-y.y)*2;q={(z.x+x.z)/s,(z.y+y.z)/s,0.25f*s,(x.y-y.x)/s};}
  return true;
 }
+struct TorsoPoints { Vec3 hips{},left{},right{}; };
 template<class Reader>
-bool ReadTorso(Reader read,std::uintptr_t base,std::uintptr_t entity,Quat& rotation,const GameBuild& build=Build150){
+bool ReadTorso(Reader read,std::uintptr_t base,std::uintptr_t entity,Quat& rotation,const GameBuild& build=Build150,TorsoPoints* pointsOut=nullptr){
  Transform transform{};std::uintptr_t components=0;std::uint16_t count=0;
  if(!read(entity+0x20,transform)||!read(entity+0x78,components)||!components||
     !read(entity+0x82,count)||count>128)return false;
@@ -58,7 +59,9 @@ bool ReadTorso(Reader read,std::uintptr_t base,std::uintptr_t entity,Quat& rotat
   }
   std::uintptr_t current=0;
   if(found!=7||!read(cp+0x288,current)||current!=buffer)return false;
-  return TorsoRotation(points[0],points[1],points[2],rotation);
+  if(!TorsoRotation(points[0],points[1],points[2],rotation))return false;
+  if(pointsOut)*pointsOut={points[0],points[1],points[2]};
+  return true;
  }
  return false;
 }

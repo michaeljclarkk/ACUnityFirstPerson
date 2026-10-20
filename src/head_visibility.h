@@ -1,11 +1,14 @@
 #pragma once
 #include <cstdint>
+#include "hood_assets.h"
 namespace fp {
 // Explicitly named Arno head resources from installed forge metadata. Include
 // both direct meshes and LOD selectors: outfit variants can reference either.
 // Do not infer neighbouring handles or hide whole outfit/body components.
 inline bool KnownHeadAsset(std::uint64_t asset) {
+ if(KnownHoodAsset(asset))return true;
  constexpr std::uint64_t ids[]={
+
   79129654667ULL, // CN_U_FR_Arno_Head_LOD0
   79129654705ULL, // CN_U_FR_Arno_Eyelash_LOD0
   87057018236ULL, // CN_U_FR_Arno_EyeTeeth_LOD0
@@ -15,13 +18,6 @@ inline bool KnownHeadAsset(std::uint64_t asset) {
   99877565356ULL, // CN_U_Arno_Hair_D_LOD1
   106022247923ULL, // CN_U_Arno_Hair_D_LOD3
   106875813386ULL, // CN_U_Arno_Hair_D_LOD2
-  119263477692ULL, // Previously verified hood
-  147798842981ULL, // Previously verified hood
-  150741245608ULL, // CN_U_Arno_HairPlane_HoodUp
-  150741245609ULL, // CN_U_Arno_HairPlane_HoodUp_LOD0
-  150741245619ULL, // CN_U_Arno_HairPlane_HoodUp_LOD1
-  150741245624ULL, // CN_U_Arno_HairPlane_HoodUp_LOD2
-  150741245629ULL, // CN_U_Arno_HairPlane_HoodUp_LOD3
   157366720363ULL, // CN_U_Arno_HairPonytail_LOD0
   157366720369ULL, // CN_U_Arno_HairPonytail_LOD1
   157366720423ULL, // CN_U_Arno_HairPonytail_LOD0

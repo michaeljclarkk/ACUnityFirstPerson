@@ -5,6 +5,7 @@
 #include "settings.h"
 #include "combat_camera.h"
 #include "body_motion.h"
+#include "chest_capsule.h"
 #include "camera_gait.h"
 #include "parkour_tracking.h"
 #include "head_visibility.h"
@@ -445,6 +446,7 @@ bool ApplyEye(void* self,float* position,float* rotation,float* fov,const fp::Qu
         fp::HeadFilter filter;
         fp::LookController look;
         fp::CameraFallback fallback;
+        fp::ChestGuard chest;
         fp::CombatBlend combat;
         fp::BodyMotion motion;
         fp::ParkourView parkourView;
@@ -482,7 +484,10 @@ bool ApplyEye(void* self,float* position,float* rotation,float* fov,const fp::Qu
     // bends or reuse combat's 0.45-second hold for orientation.
     const float motionAmount=(fp::FollowRoll(followCombatMotion,groundRoll,hasHead)||((followLeap||followParkour)&&hasHead))?1.0f:0.0f;
     fp::Quat torso{};
-    const bool hasTorso=hasHead&&motionAmount>0.001f&&fp::ReadTorso(read,base,entity,torso,*gameBuild);
+    const bool chestScope=state.chest.Scope(trackHead&&((followCombatMotion&&groundRoll)||followLeap||followParkour),dt);
+    fp::TorsoPoints torsoPoints{};
+    const bool sampledTorso=hasHead&&(motionAmount>0.001f||chestScope)&&fp::ReadTorso(read,base,entity,torso,*gameBuild,&torsoPoints);
+    const bool hasTorso=sampledTorso&&motionAmount>0.001f;
     const auto motionPose=state.parkourView.Step(torso,q,hasTorso&&followParkour);
     const auto bodyRotation=state.motion.Step(followParkour?motionPose:torso,hasTorso,state.look.previousBody,motionAmount,dt,(followLeap||followParkour)?&q:nullptr);
     // Keep the filtered anchor, including during roll recovery. Raw torso/head
@@ -511,15 +516,30 @@ bool ApplyEye(void* self,float* position,float* rotation,float* fov,const fp::Qu
         lastApplied.store(0);
         return false; // failed query: retain the engine camera instead of a blind override
     }
+    // Check the final eye: wall clearance can itself place it inside the chest.
+    if(chestScope) {
+        const auto corrected=fp::CorrectChest(torsoPoints,head,eye,sampledTorso&&hasHead);
+        if(fp::DistanceSquared(corrected,eye)>0.000001f) {
+            if(collisionEnabled) {
+                fp::Vec3 protectedCorrection{};
+                float correctionObstruction=-1;
+                if(!ProtectEye(entity,eye,corrected,q,0,correctionObstruction,protectedCorrection)) {
+                    collisionFault.store(true);lastApplied.store(0);return false;
+                }
+                eye=protectedCorrection;
+            } else eye=corrected;
+        }
+    }
+    const bool chestBlocked=chestScope&&state.chest.Step(torsoPoints,head,eye,sampledTorso&&hasHead,dt);
     const bool wasFallback=state.fallback.active;
     const bool useNative=state.fallback.Step(fp::Length(fp::Sub(eye,requestedEye)),
-        state.look.relative,headAvailable,dt,autoThirdPerson);
+        state.look.relative,headAvailable,dt,autoThirdPerson,chestBlocked);
     if(useNative!=wasFallback) {
         char reason[256]{};
-        sprintf_s(reason,"Camera fallback %s: collision=%d rearLook=%d missingHead=%d pullback=%.3f yaw=%.1f navRva=%llX",
+        sprintf_s(reason,"Camera fallback %s: collision=%d rearLook=%d missingHead=%d chest=%d pullback=%.3f yaw=%.1f navRva=%llX",
             useNative?"entered":"cleared",
             fp::Length(fp::Sub(eye,requestedEye))>0.25f?1:0,
-            std::abs(state.look.relative)>85*fp::Pi/180?1:0,headAvailable?0:1,
+            std::abs(state.look.relative)>85*fp::Pi/180?1:0,headAvailable?0:1,chestBlocked?1:0,
             fp::Length(fp::Sub(eye,requestedEye)),state.look.relative*180/fp::Pi,
             static_cast<unsigned long long>(NavigationState(entity)));
         Log(reason);
@@ -682,10 +702,10 @@ void Menu(loader::Gui& gui) {
         ImGui::SliderFloat("Combat vertical field of view",&draft.combatFov,40,100,"%.0f degrees",ImGuiSliderFlags_AlwaysClamp);
         ImGui::TreePop();
     }
-    ImGui::Checkbox("Hide head in main view (experimental shadows)",&draft.hideHead);
+    ImGui::Checkbox("Hide head and hood in main view (keep shadows)",&draft.hideHead);
     ImGui::Checkbox("Wall clearance",&draft.collision);
     ImGui::Checkbox("Automatically fall back to third person",&draft.automatic);
-    ImGui::TextWrapped("Automatic fallback uses third person for rearward looks or large wall corrections. Leave off to stay in first person.");
+    ImGui::TextWrapped("Automatic fallback uses third person for rearward looks or large wall corrections. Small torso overlaps are corrected in first person. Sustained unresolved overlaps and lost head tracking can still use third person with this off.");
     if(ImGui::TreeNode("Advanced wall clearance")) {
         ImGui::SliderFloat("Wall padding",&draft.padding,0.05f,0.3f,"%.2f m",ImGuiSliderFlags_AlwaysClamp);
         ImGui::SliderFloat("Probe radius",&draft.radius,0.03f,0.25f,"%.2f m",ImGuiSliderFlags_AlwaysClamp);

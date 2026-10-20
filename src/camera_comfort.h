@@ -31,9 +31,9 @@ struct LookController {
 struct CameraFallback {
  bool active=false;
  float clearTime=0;
- bool Step(float pullback,float relativeYaw,bool hasHead,float dt,bool automatic=true) {
-  const bool enter=!hasHead||(automatic&&(pullback>0.25f||std::abs(relativeYaw)>85*Pi/180));
-  const bool clear=hasHead&&(!automatic||(pullback<0.10f&&std::abs(relativeYaw)<70*Pi/180));
+ bool Step(float pullback,float relativeYaw,bool hasHead,float dt,bool automatic=true,bool torsoBlocked=false) {
+  const bool enter=torsoBlocked||!hasHead||(automatic&&(pullback>0.25f||std::abs(relativeYaw)>85*Pi/180));
+  const bool clear=!torsoBlocked&&hasHead&&(!automatic||(pullback<0.10f&&std::abs(relativeYaw)<70*Pi/180));
   if(enter){active=true;clearTime=0;}
   else if(active){
    clearTime=clear?clearTime+std::clamp(dt,0.0f,0.1f):0;
