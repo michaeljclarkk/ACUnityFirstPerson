@@ -1,5 +1,6 @@
 #pragma once
 #include "parkour_clips.h"
+#include "combat_clips.h"
 #include <cmath>
 namespace fp {
 struct PoseClipSample {
@@ -52,24 +53,37 @@ struct ParkourCapture {
  }
 };
 // Protected by the caller's short lock. No allocation/logging in the callback.
-struct ParkourPlayback {
+template<bool Combat> struct ClipPlayback {
+ static bool Matches(std::uint64_t id) {
+  if constexpr(Combat){const auto* clip=FindCombatClip(id);return clip&&clip->follow;}
+  else return FindParkourClip(id)!=nullptr;
+ }
  std::uintptr_t entity=0;unsigned epoch=0;
  std::uint32_t latestFrame=0,matchedFrame=0;
- std::uint64_t matchedAt=0,handle=0,samples=0,matches=0,lateSamples=0,lastHandle=0;
+ std::uint64_t latestSampleAt=0,matchedAt=0,handle=0,samples=0,matches=0,lateSamples=0,lastHandle=0;
  std::uint32_t lastToken=0;
  bool initialized=false;
  void Observe(const PoseClipSample& sample,unsigned generation,std::uint64_t now) {
   if(!initialized||entity!=sample.entity||epoch!=generation){*this={};entity=sample.entity;epoch=generation;latestFrame=sample.frame;initialized=true;}
   ++samples;lastHandle=sample.handle;lastToken=sample.frame;
-  if(FindParkourClip(sample.handle))++matches;
-  const auto advance=static_cast<std::int32_t>(sample.frame-latestFrame);
-  if(advance<0){++lateSamples;return;} // delayed worker from an earlier frame
+  if(Matches(sample.handle))++matches;
+  // Combat contexts mix cache sentinels and unrelated tokens (observed:
+  // FFFFFFFF, 743623600, 1393476043). They cannot order playback frames.
+  if constexpr(Combat) {
+   if(now<latestSampleAt){++lateSamples;return;}
+   latestSampleAt=now;
+  } else {
+   const auto advance=static_cast<std::int32_t>(sample.frame-latestFrame);
+   if(advance<0){++lateSamples;return;}
+  }
   latestFrame=sample.frame;
-  if(FindParkourClip(sample.handle)){handle=sample.handle;matchedFrame=sample.frame;matchedAt=now;}
+  if(Matches(sample.handle)){handle=sample.handle;matchedFrame=sample.frame;matchedAt=now;}
  }
  std::uint64_t Active(std::uintptr_t player,unsigned generation,std::uint64_t now)const {
   return initialized&&entity==player&&epoch==generation&&handle&&now>=matchedAt&&
-   now-matchedAt<=100&&static_cast<std::uint32_t>(latestFrame-matchedFrame)<=1?handle:0;
+   now-matchedAt<=100&&(Combat||static_cast<std::uint32_t>(latestFrame-matchedFrame)<=1)?handle:0;
  }
 };
+using ParkourPlayback=ClipPlayback<false>;
+using CombatPlayback=ClipPlayback<true>;
 }

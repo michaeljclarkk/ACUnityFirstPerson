@@ -77,6 +77,20 @@ struct ParkourView {
   return Multiply(torso,offset);
  }
 };
+// Smooth the world-space target, not a correction against the changing mouse view.
+// Otherwise mouse deltas leak through the smoothed correction during an action.
+struct CombatView {
+ ParkourView follow;
+ Quat output{0,0,0,1};
+ Quat Step(Quat torso,Quat native,bool active,float dt) {
+  if(!active){follow.Step(torso,native,false);output=native;return native;}
+  const bool entering=!follow.tracking;
+  const auto target=follow.Step(torso,native,true);
+  if(entering)output=target;
+  else output=BlendRotation(output,target,1-std::exp(-60*std::clamp(dt,0.0f,0.1f)));
+  return output;
+ }
+};
 struct BodyMotion {
  Quat applied{0,0,0,1};
  Quat Step(Quat torso,bool valid,float bodyYaw,float amount,float dt,const Quat* viewReference=nullptr){

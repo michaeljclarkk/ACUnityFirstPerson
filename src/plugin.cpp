@@ -42,9 +42,10 @@ using SamplePose=std::uintptr_t(__fastcall*)(std::uintptr_t,std::uintptr_t,std::
 SamplePose originalSamplePose=nullptr;
 std::atomic<std::uintptr_t> sampledPlayer{0};
 std::atomic<bool> parkourObserverReady{false};
-std::atomic<std::uint64_t> parkourActiveClip{0};
+std::atomic<std::uint64_t> parkourActiveClip{0},combatActiveClip{0};
 SRWLOCK playbackLock=SRWLOCK_INIT;
 fp::ParkourPlayback parkourPlayback;
+fp::CombatPlayback combatPlayback;
 fp::ParkourCapture parkourCapture;
 float headEyeHeight=0.12f,headForward=0.16f;
 std::atomic<ULONGLONG> lastApplied{0};
@@ -100,10 +101,12 @@ std::uintptr_t __fastcall ObservePose(std::uintptr_t node,std::uintptr_t pose,st
     const auto player=sampledPlayer.load();
     if(!enabled.load()||!player)return result;
     const auto generation=cameraEpoch.load();
+    const auto sampledAt=GetTickCount64();
     fp::PoseClipSample sample{};
     if(fp::ReadPoseClip([](std::uintptr_t address,auto& value){return Read(address,value);},node,context,player,sample)) {
         AcquireSRWLockExclusive(&playbackLock);
         parkourPlayback.Observe(sample,generation,GetTickCount64());
+        combatPlayback.Observe(sample,generation,sampledAt);
         parkourCapture.Observe(sample);
         ReleaseSRWLockExclusive(&playbackLock);
     }
@@ -192,6 +195,12 @@ bool InstallParkourObserver() {
 std::uint64_t ActiveParkourClip(std::uintptr_t entity,unsigned generation) {
     AcquireSRWLockShared(&playbackLock);
     const auto clip=parkourPlayback.Active(entity,generation,GetTickCount64());
+    ReleaseSRWLockShared(&playbackLock);
+    return clip;
+}
+std::uint64_t ActiveCombatClip(std::uintptr_t entity,unsigned generation) {
+    AcquireSRWLockShared(&playbackLock);
+    const auto clip=combatPlayback.Active(entity,generation,GetTickCount64());
     ReleaseSRWLockShared(&playbackLock);
     return clip;
 }
@@ -419,7 +428,7 @@ std::uintptr_t NavigationState(std::uintptr_t entity) {
 }
 
 bool ApplyEye(void* self,float* position,float* rotation,float* fov,const fp::Quat& cleanRotation) {
-    parkourActiveClip.store(0);
+    parkourActiveClip.store(0);combatActiveClip.store(0);
     if (!position || !rotation || !fov || self!=LocalCamera() || MenuOpen()) {sampledPlayer.store(0);return false;}
     std::uintptr_t entity=0;
     fp::Vec3 root{},old{},bodyForward{};
@@ -435,7 +444,9 @@ bool ApplyEye(void* self,float* position,float* rotation,float* fov,const fp::Qu
     const bool followLeap=followLeapOfFaith&&leap;
     sampledPlayer.store(entity);
     const auto parkourClip=followParkourSpins&&parkourObserverReady.load()?ActiveParkourClip(entity,cameraEpoch.load()):0;
-    const bool followParkour=parkourClip!=0&&!followLeap;
+    const auto combatClip=followCombatMotion&&parkourObserverReady.load()?ActiveCombatClip(entity,cameraEpoch.load()):0;
+    const bool followCombat=combatClip!=0&&!followLeap;
+    const bool followParkour=parkourClip!=0&&!followLeap&&!followCombat;
     parkourActiveClip.store(followParkour?parkourClip:0);
     // Native cinematic pullback is expected during a verified leap.
     if(fp::DistanceSquared(old,root)>144.0f&&!followLeap)return false;
@@ -450,6 +461,7 @@ bool ApplyEye(void* self,float* position,float* rotation,float* fov,const fp::Qu
         fp::CombatBlend combat;
         fp::BodyMotion motion;
         fp::ParkourView parkourView;
+        fp::CombatView combatView;
         fp::GaitRig gait;
         ULONGLONG diagnosticTime=0;
         float obstruction=-1;
@@ -472,7 +484,7 @@ bool ApplyEye(void* self,float* position,float* rotation,float* fov,const fp::Qu
     fp::Vec3 head{};
     const bool hasHead=trackHead&&fp::ReadHead(read,base,entity,head,*gameBuild);
     const fp::Vec3 anchor=state.filter.Step(root,head,hasHead,dt,headHalfLife,eyeHeight-headEyeHeight,
-        fp::FollowRoll(followCombatMotion,groundRoll,hasHead)||((followLeap||followParkour)&&hasHead));
+        fp::FollowRoll(followCombatMotion,groundRoll,hasHead)||((followLeap||followParkour||followCombat)&&hasHead));
     const bool headAvailable=trackHead&&state.filter.Available();
     fp::Vec3 eye{};
     combatStatus.store(static_cast<int>(combatState));
@@ -480,25 +492,37 @@ bool ApplyEye(void* self,float* position,float* rotation,float* fov,const fp::Qu
     const float framedHeight=fp::CombatLerp(headEyeHeight,combatEyeHeight,combatAmount);
     const float framedForward=fp::CombatLerp(headForward,combatForward,combatAmount);
     if(!fp::LevelEyePosition(anchor,q,framedHeight,framedForward,eye))return false;
-    // Combat membership is not a roll/spin detector. Never track ordinary attack
-    // bends or reuse combat's 0.45-second hold for orientation.
-    const float motionAmount=(fp::FollowRoll(followCombatMotion,groundRoll,hasHead)||((followLeap||followParkour)&&hasHead))?1.0f:0.0f;
+    // Exact sampled combat actions authorize rotation independently of the
+    // broad combat framing state and its 0.45-second hold.
+    const float motionAmount=(fp::FollowRoll(followCombatMotion,groundRoll,hasHead)||((followLeap||followParkour||followCombat)&&hasHead))?1.0f:0.0f;
     fp::Quat torso{};
-    const bool chestScope=state.chest.Scope(trackHead&&((followCombatMotion&&groundRoll)||followLeap||followParkour),dt);
+    const bool chestScope=state.chest.Scope(trackHead&&((followCombatMotion&&groundRoll)||followLeap||followParkour||followCombat),dt);
     fp::TorsoPoints torsoPoints{};
     const bool sampledTorso=hasHead&&(motionAmount>0.001f||chestScope)&&fp::ReadTorso(read,base,entity,torso,*gameBuild,&torsoPoints);
     const bool hasTorso=sampledTorso&&motionAmount>0.001f;
     const auto motionPose=state.parkourView.Step(torso,q,hasTorso&&followParkour);
-    const auto bodyRotation=state.motion.Step(followParkour?motionPose:torso,hasTorso,state.look.previousBody,motionAmount,dt,(followLeap||followParkour)?&q:nullptr);
+    auto bodyRotation=state.motion.Step(followParkour?motionPose:torso,hasTorso,state.look.previousBody,motionAmount,dt,(followLeap||followParkour)?&q:nullptr);
+    const bool combatOwnsView=hasTorso&&followCombat;
+    combatActiveClip.store(combatOwnsView?combatClip:0);
+    const auto combatView=state.combatView.Step(torso,q,combatOwnsView,dt);
+    if(combatOwnsView) {
+        bodyRotation=fp::Multiply(combatView,fp::InverseUnit(q));
+        state.motion.applied=bodyRotation; // retain the existing eased release
+    }
     // Keep the filtered anchor, including during roll recovery. Raw torso/head
     // displacement must not drag the camera through an attack animation.
     eye=fp::Add(anchor,fp::Rotate(bodyRotation,fp::Sub(eye,anchor)));
     q=fp::Multiply(bodyRotation,q);
+    if(combatOwnsView) {
+        // Keep position as well as orientation independent of mouse movement.
+        if(!fp::LevelEyePosition(anchor,combatView,framedHeight,framedForward,eye))return false;
+        q=combatView;
+    }
     // Step bob and look sway over the settled eye, damped while a weapon is
     // drawn the way aiming steadies a camera.
     const auto gait=state.gait.Step(root,state.look.previousYaw,dt,gaitCamera,
-        1.0f-0.6f*std::clamp(combatAmount,0.0f,1.0f));
-    if(gait.right!=0.0f||gait.up!=0.0f) {
+        combatOwnsView?0.0f:1.0f-0.6f*std::clamp(combatAmount,0.0f,1.0f));
+    if(!combatOwnsView&&(gait.right!=0.0f||gait.up!=0.0f)) {
         eye=fp::Add(eye,fp::Scale(fp::Rotate(q,{1,0,0}),gait.right));
         eye=fp::Add(eye,fp::Scale(fp::Rotate(q,{0,0,1}),gait.up));
     }
@@ -533,7 +557,7 @@ bool ApplyEye(void* self,float* position,float* rotation,float* fov,const fp::Qu
     const bool chestBlocked=chestScope&&state.chest.Step(torsoPoints,head,eye,sampledTorso&&hasHead,dt);
     const bool wasFallback=state.fallback.active;
     const bool useNative=state.fallback.Step(fp::Length(fp::Sub(eye,requestedEye)),
-        state.look.relative,headAvailable,dt,autoThirdPerson,chestBlocked);
+        combatOwnsView?0.0f:state.look.relative,headAvailable,dt,autoThirdPerson,chestBlocked);
     if(useNative!=wasFallback) {
         char reason[256]{};
         sprintf_s(reason,"Camera fallback %s: collision=%d rearLook=%d missingHead=%d chest=%d pullback=%.3f yaw=%.1f navRva=%llX",
@@ -597,7 +621,7 @@ void __fastcall CameraFx(void* self,float* position,float* rotation,float* fov) 
     fp::Quat clean{};
     const bool haveClean=Read(reinterpret_cast<std::uintptr_t>(rotation),clean);
     originalFx(self,position,rotation,fov);
-    if (!haveClean || !enabled.load() || faulted.load() || !GameFocused()) {parkourActiveClip.store(0);sampledPlayer.store(0);return;}
+    if (!haveClean || !enabled.load() || faulted.load() || !GameFocused()) {parkourActiveClip.store(0);combatActiveClip.store(0);sampledPlayer.store(0);return;}
     AcquireSRWLockShared(&settingsLock);
     const bool applied=ApplyEye(self,position,rotation,fov,clean);
     ReleaseSRWLockShared(&settingsLock);
@@ -692,8 +716,8 @@ void Menu(loader::Gui& gui) {
     if(draft.followParkour)
         ImGui::TextWrapped("For the smoothest parkour, let go of the mouse during moves and let Arno take over. Mouse control stays available whenever you need it.");
     ImGui::Checkbox("Follow Leap of Faith",&draft.followLeap);
-    ImGui::Checkbox("Follow recognized rolls",&draft.followMotion);
-    ImGui::TextWrapped("Rotate the camera with recognized ground and combat rolls. Ordinary attacks and parries keep your normal aim.");
+    ImGui::Checkbox("Follow combat actions and rolls",&draft.followMotion);
+    ImGui::TextWrapped("Follow sampled combat attacks, parries, finishers, dodges and hit-reaction turns. Animation takes priority over mouse look during these actions; idle, strafe and sustained aim keep mouse control.");
     ImGui::Checkbox("Combat framing",&draft.combat);
     if(ImGui::TreeNode("Combat view")) {
         ImGui::TextWrapped("Lowers the eye and widens the view during combat to show more arms and weapon movement. Changes blend smoothly. Field of view never narrows an already wider view.");
@@ -753,8 +777,9 @@ void Frame(loader::Gui& gui) {
         ReleaseSRWLockExclusive(&playbackLock);
         if(!captured)break;
         const auto* known=fp::FindParkourClip(entry.handle);
+        const auto* combat=fp::FindCombatClip(entry.handle);
         char message[192]{};
-        sprintf_s(message,"Parkour sampled: clip=%llu token=%u family=%s",static_cast<unsigned long long>(entry.handle),entry.token,known?known->family:"unmapped");
+        sprintf_s(message,"Parkour sampled: clip=%llu token=%u family=%s",static_cast<unsigned long long>(entry.handle),entry.token,known?known->family:combat?(combat->follow?"combat_action":"combat_passive"):"unmapped");
         Log(message);
     }
     static ULONGLONG nextParkourDiagnostic=0;
@@ -776,6 +801,15 @@ void Frame(loader::Gui& gui) {
         reportedParkour=clip;++parkourReports;
         const auto* entry=fp::FindParkourClip(clip);
         char message[160]{};sprintf_s(message,"Parkour playback: clip=%llu family=%s",static_cast<unsigned long long>(clip),entry?entry->family:"none");Log(message);
+    }
+    static std::uint64_t reportedCombat=0;
+    static unsigned combatReports=0;
+    const auto combatClip=combatActiveClip.load();
+    if(combatClip!=reportedCombat&&combatReports<256) {
+        reportedCombat=combatClip;++combatReports;
+        char message[128]{};
+        sprintf_s(message,"Combat playback: clip=%llu animationPriority=%d",static_cast<unsigned long long>(combatClip),combatClip?1:0);
+        Log(message);
     }
     static int reported=0;
     const int mode=anchorMode.load();

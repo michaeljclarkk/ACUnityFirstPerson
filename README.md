@@ -62,7 +62,7 @@ The mod never touches Unity's own controls, so nothing you have bound in-game st
 Period was chosen because the game doesn't use it by default; if it clashes with something
 else you have installed, rebind the toggle in the menu.
 
-During tracked rolls, leaps and recognised parkour, a tapered torso capsule checks the final eye position against Arno's body, excluding the head area. It continues for 0.25 seconds after the manoeuvre. Small overlaps receive up to 8 cm of wall-checked correction while staying in first person. Third person is reserved for penetration deeper than 3 cm that remains unresolved for 0.12 seconds. Missing torso reads do not trigger fallback on their own; head-tracking loss retains its existing handling.
+During tracked combat actions, rolls, leaps and recognised parkour, a tapered torso capsule checks the final eye position against Arno's body, excluding the head area. It continues for 0.25 seconds after the manoeuvre. Small overlaps receive up to 8 cm of wall-checked correction while staying in first person. Third person is reserved for penetration deeper than 3 cm that remains unresolved for 0.12 seconds. Missing torso reads do not trigger fallback on their own; head-tracking loss retains its existing handling.
 
 Head hiding also covers verified separate player hood meshes across standard outfits, supported legacy outfits and Dead Kings, including raised/lowered forms and detail levels. It preserves their shadow visibility. Custom mods that reuse these resource IDs inherit the behaviour; new IDs need verification, and hoods merged into a body mesh cannot be selectively hidden by this mechanism.
 
@@ -88,7 +88,7 @@ Head hiding also covers verified separate player hood meshes across standard out
 | `CombatEyeHeight` | `-0.06` | Combat eye height relative to the tracked head. |
 | `CombatForward` | `0.02` | Combat forward offset. |
 | `CombatVerticalFOV` | `80` | Combat vertical FOV. Wider existing FOVs are preserved. |
-| `FollowCombatMotion` | `1` | Follow recognised ground and combat rolls. Ordinary combat keeps native aim. Combat rolls are gameplay verified on 1.5.0; 1.5.1 testing is pending. |
+| `FollowCombatMotion` | `1` | Follow ground/combat rolls and sampled combat actions with priority over mouse look, including attacks, parries, finishers, dodges, directional hits and reaction turns. Maps 2,907 combat clips with 1,713 action candidates; passive idle, strafe and sustained aim retain mouse control. Uses the same guarded pose observer on 1.5.0 and 1.5.1. Expanded combat coverage still needs gameplay validation on both versions. |
 | `FollowParkourSpins` | `1` | Camera follow for 493 catalogued parkour turn, roll, swing and descent candidates, including downward vaults, reverse grinds and 180-degree climb exits. Uses actual pose sampling.
 | `FollowLeapOfFaith` | `1` | Follow the Leap of Faith dive, independently of the combat options. |
 
